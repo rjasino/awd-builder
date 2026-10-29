@@ -89,7 +89,9 @@ def run(args):
         return 0
 
     tool = plan["tool"]
-    print(f"Running {len(cases)} routing case(s) for '{plan['name']}' with {tool}\n")
+    model = plan.get("model")
+    model_note = f" model {model}" if model else ""
+    print(f"Running {len(cases)} routing case(s) for '{plan['name']}' with {tool}{model_note}\n")
     failed = []
     for case in cases:
         try:
@@ -99,6 +101,7 @@ def run(args):
                 target,
                 write=False,
                 timeout=args.timeout,
+                model=model,
             )
         except WorkflowError as error:
             code, stdout, stderr = None, "", str(error)

@@ -40,6 +40,8 @@ Upgrade later with `pipx upgrade awd-builder`.
 
    Edit `<project>/workflow-plan.yaml`. Set `tool` to `claude-code` or `opencode`, and list the folders, agents, skills, and commands you want.
 
+   Set `model` to the model name your tool accepts, for example `sonnet` for claude-code or `opencode-go/claude-haiku-5-5` for opencode. It is used for scaffolding and the routing evals. Each agent can set its own `model` to override it. Leave both out to use the tool's default.
+
 2. Preview, then scaffold:
 
    ```

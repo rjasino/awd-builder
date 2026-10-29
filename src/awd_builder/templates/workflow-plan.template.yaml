@@ -8,6 +8,13 @@ name: my-workflow
 # Agentic tool to scaffold for: claude-code or opencode
 tool: claude-code
 
+# Model passed to the agent CLI for scaffolding and routing evals, and written into
+# agent files that do not set their own. Use a model name the chosen tool accepts:
+# for claude-code, an alias such as sonnet or opus, or a full model ID.
+# for opencode, provider/model, for example opencode-go/claude-haiku-5-5.
+# Leave it out to use the tool's default model.
+model: sonnet
+
 # Folders to create in the project, relative to its root.
 folders:
   - docs
@@ -17,6 +24,8 @@ folders:
 agents:
   - name: planner
     description: Breaks a feature request into ordered implementation tasks. Use when the user asks for a plan or a task breakdown before coding.
+    # Optional: overrides the top-level model for this agent only, in the same format.
+    # model: opus
     instructions: |
       Read the request and any relevant docs in docs/.
       Produce a numbered task list. Each task has a short title and acceptance criteria.

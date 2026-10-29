@@ -64,6 +64,8 @@ def validate_plan(plan):
         raise WorkflowError("the plan needs a 'name'")
     if plan.get("tool") not in TOOLS:
         raise WorkflowError(f"'tool' must be one of: {', '.join(TOOLS)}")
+    if plan.get("model") is not None:
+        check_model(plan["model"], "'model'")
 
     folders = plan.get("folders") or []
     if not isinstance(folders, list) or not all(isinstance(f, str) and f for f in folders):
@@ -86,6 +88,15 @@ def validate_plan(plan):
             if name in seen:
                 raise WorkflowError(f"name '{name}' is used more than once ({seen[name]} and {kind})")
             seen[name] = kind
+            if item.get("model") is not None:
+                if kind != "agents":
+                    raise WorkflowError(f"'model' is only supported on agents, not on '{name}' in '{kind}'")
+                check_model(item["model"], f"'model' of agent '{name}'")
+
+
+def check_model(value, where):
+    if not isinstance(value, str) or not value.strip():
+        raise WorkflowError(f"{where} must be a non-empty string, for example sonnet or opencode-go/claude-haiku-5-5")
 
 
 def components(plan):
@@ -118,17 +129,19 @@ def run_checked(args, cwd):
     return result
 
 
-def run_agent(tool_name, prompt, cwd, *, write, timeout):
+def run_agent(tool_name, prompt, cwd, *, write, timeout, model=None):
     """Send one non-interactive prompt to the chosen agentic CLI.
 
     write=True lets the agent edit files. write=False runs in read-only mode.
+    model=None uses the CLI's default model.
     Returns (returncode, stdout, stderr).
     """
     tool = TOOLS[tool_name]
     exe = find_executable(tool["cli"])
+    model_args = ["--model", model] if model else []
 
     if tool_name == "claude-code":
-        args = [exe, "-p", "--permission-mode", "acceptEdits" if write else "plan"]
+        args = [exe, "-p", "--permission-mode", "acceptEdits" if write else "plan", *model_args]
         return _run(args, cwd, {"input": prompt}, timeout)
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -137,7 +150,7 @@ def run_agent(tool_name, prompt, cwd, *, write, timeout):
         args = [exe, "run"]
         if write:
             args.append("--auto")
-        args += ["--file", str(prompt_file), "Follow the attached instructions."]
+        args += [*model_args, "--file", str(prompt_file), "Follow the attached instructions."]
         return _run(args, cwd, {"stdin": subprocess.DEVNULL}, timeout)
 
 

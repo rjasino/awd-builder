@@ -41,7 +41,7 @@ def item_path(kind, name, tool):
     return f"{tool['commands_dir']}/{name}.md"
 
 
-def build_prompt(kind, item, tool_name):
+def build_prompt(kind, item, tool_name, agent_model=None):
     tool = TOOLS[tool_name]
     name = str(item["name"])
     description = str(item["description"]).strip()
@@ -55,10 +55,11 @@ def build_prompt(kind, item, tool_name):
     )
 
     if kind == "agent":
+        model_hint = f' Set its `model` frontmatter field to exactly "{agent_model}".' if agent_model else ""
         body = (
             f'Using the skill-creator skill\'s guidance on writing clear, well-scoped instructions, '
             f'create one {tool["label"]} subagent named "{name}".\n\n'
-            f"{AGENT_FORMAT_HINTS[tool_name]}\n\n"
+            f"{AGENT_FORMAT_HINTS[tool_name]}{model_hint}\n\n"
         )
     elif kind == "skill":
         body = (
@@ -116,10 +117,12 @@ def scaffold(plan, target, dry_run):
         print(f"  ok {eval_dst.relative_to(target)}")
 
     print_step("Agents, skills and commands")
+    default_model = plan.get("model")
     failures = []
     for kind, item in components(plan):
         name = str(item["name"])
-        prompt, rel_path = build_prompt(kind, item, tool_name)
+        agent_model = (item.get("model") or default_model) if kind == "agent" else None
+        prompt, rel_path = build_prompt(kind, item, tool_name, agent_model)
         if dry_run:
             print(f"  [{kind}] {name} -> {rel_path}")
             print("  ---- prompt ----")
@@ -128,7 +131,9 @@ def scaffold(plan, target, dry_run):
             continue
 
         print(f"  [{kind}] {name} -> {rel_path} ...", flush=True)
-        code, stdout, stderr = run_agent(tool_name, prompt, target, write=True, timeout=AGENT_TIMEOUT)
+        code, stdout, stderr = run_agent(
+            tool_name, prompt, target, write=True, timeout=AGENT_TIMEOUT, model=default_model
+        )
         if code == 0 and (target / rel_path).is_file():
             print("    ok")
         else:
@@ -145,7 +150,8 @@ def run(args):
     target = Path(args.target).resolve()
     try:
         plan = load_plan(target / args.plan)
-        print(f"Scaffolding '{plan['name']}' for {plan['tool']} in {target}")
+        model_note = f" (default model: {plan['model']})" if plan.get("model") else ""
+        print(f"Scaffolding '{plan['name']}' for {plan['tool']}{model_note} in {target}")
         if args.dry_run:
             print("(dry run: nothing will be changed)")
         scaffold(plan, target, args.dry_run)
