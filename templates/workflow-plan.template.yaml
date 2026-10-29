@@ -1,0 +1,41 @@
+# Workflow plan template.
+# Copy this file to <project>/workflow-plan.yaml and replace the example values.
+# Then run: python scripts/scaffold.py --target <project>
+
+# Name of the workflow. Used in messages and in the eval file.
+name: my-workflow
+
+# Agentic tool to scaffold for: claude-code or opencode
+tool: claude-code
+
+# Folders to create in the project, relative to its root.
+folders:
+  - docs
+  - scripts
+
+# Subagents to create. Each one becomes an agent file in the tool's agents folder.
+agents:
+  - name: planner
+    description: Breaks a feature request into ordered implementation tasks. Use when the user asks for a plan or a task breakdown before coding.
+    instructions: |
+      Read the request and any relevant docs in docs/.
+      Produce a numbered task list. Each task has a short title and acceptance criteria.
+      Do not edit code.
+
+# Skills to create. Each one becomes a SKILL.md in the tool's skills folder.
+# The description is what the agent uses to decide when to load the skill, so make it specific.
+skills:
+  - name: code-review
+    description: Reviews code changes for bugs, regressions, and missing tests. Use when the user asks to review a diff, a file, or a pull request.
+    instructions: |
+      Read the changed files and the surrounding code.
+      List findings by severity with file and line references.
+      Note any missing tests. Suggest fixes but do not apply them.
+
+# Slash commands to create. Each one becomes a markdown file in the tool's commands folder.
+commands:
+  - name: review
+    description: Review the given files or paths for bugs and missing tests.
+    instructions: |
+      Review $ARGUMENTS for bugs and missing tests.
+      Use the code-review skill's checklist.
