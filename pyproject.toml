@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awd-builder"
+version = "0.1.0"
+description = "Scaffold agentic workflows (agents, skills, commands, folders, routing evals) for Claude Code and OpenCode from a YAML plan."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["PyYAML>=6.0"]
+keywords = ["claude-code", "opencode", "agents", "skills", "slash-commands", "scaffold", "evals"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+]
+
+[project.scripts]
+awd-builder = "awd_builder.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+awd_builder = ["templates/*.yaml", "skills/eval-creator/*.md"]
