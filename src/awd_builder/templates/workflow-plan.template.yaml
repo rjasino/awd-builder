@@ -1,6 +1,6 @@
 # Workflow plan template.
-# Copy this file to <project>/workflow-plan.yaml and replace the example values.
-# Then run: python scripts/scaffold.py --target <project>
+# Written into <project>/workflow-plan.yaml by `awd-builder scaffold init <project>`.
+# Replace the example values, then run: awd-builder scaffold run <project>
 
 # Name of the workflow. Used in messages and in the eval file.
 name: my-workflow

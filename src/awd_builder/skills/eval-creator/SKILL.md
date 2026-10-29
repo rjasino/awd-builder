@@ -62,7 +62,7 @@ Rules for the file:
 The runner is the `awd-builder` CLI, installed on the user's machine. Run:
 
 ```
-awd-builder evals --target <project-folder>
+awd-builder evals <project-folder>
 ```
 
 Add `--dry-run` to print the exact routing prompts without calling the agent. Add `--only <id>` to run one case.

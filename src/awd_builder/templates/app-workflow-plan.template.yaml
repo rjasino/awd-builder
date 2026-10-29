@@ -1,0 +1,23 @@
+# Application workflow plan for `awd-builder app`.
+# Preview first:  awd-builder app run <project> --dry-run
+# Then scaffold:  awd-builder app run <project>
+
+# Name of the application project.
+name: my-app
+
+# Spec Kit integration key for your coding agent, for example claude, codex,
+# copilot, cursor-agent, opencode or pi. Run `specify integration list` for all keys.
+integration: claude
+
+# Folders to create in the project, relative to the project folder.
+folders:
+  - docs
+  - src
+  - tests
+
+# Spec Kit extensions to install. Uncomment the ones you need:
+#   assess  idea assessment before you build (go / needs-clarification / kill)
+#   bug     bug assessment, fix and verification
+extensions:
+  # - assess
+  # - bug

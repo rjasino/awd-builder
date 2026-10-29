@@ -10,11 +10,13 @@ import yaml
 
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PLAN_FILE = "workflow-plan.yaml"
+APP_PLAN_FILE = "app-workflow-plan.yaml"
 EVAL_FILE = "evals/routing.yaml"
 ITEM_KINDS = ("agents", "skills", "commands")
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PLAN_TEMPLATE = PACKAGE_DIR / "templates" / "workflow-plan.template.yaml"
+APP_PLAN_TEMPLATE = PACKAGE_DIR / "templates" / "app-workflow-plan.template.yaml"
 EVAL_CREATOR_DIR = PACKAGE_DIR / "skills" / "eval-creator"
 
 TOOLS = {
@@ -51,6 +53,15 @@ def load_yaml(path):
         raise WorkflowError(f"invalid YAML in {path}: {error}") from error
 
 
+def write_template(template, target, file_name, force):
+    dest = target / file_name
+    if dest.exists() and not force:
+        raise WorkflowError(f"{dest} already exists (use --force to overwrite)")
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(template, dest)
+    return dest
+
+
 def load_plan(path):
     plan = load_yaml(path)
     validate_plan(plan)
@@ -67,12 +78,7 @@ def validate_plan(plan):
     if plan.get("model") is not None:
         check_model(plan["model"], "'model'")
 
-    folders = plan.get("folders") or []
-    if not isinstance(folders, list) or not all(isinstance(f, str) and f for f in folders):
-        raise WorkflowError("'folders' must be a list of paths")
-    for folder in folders:
-        if Path(folder).is_absolute() or ".." in Path(folder).parts:
-            raise WorkflowError(f"folder '{folder}' must be a relative path inside the project")
+    check_folders(plan.get("folders") or [])
 
     seen = {}
     for kind in ITEM_KINDS:
@@ -92,6 +98,14 @@ def validate_plan(plan):
                 if kind != "agents":
                     raise WorkflowError(f"'model' is only supported on agents, not on '{name}' in '{kind}'")
                 check_model(item["model"], f"'model' of agent '{name}'")
+
+
+def check_folders(folders):
+    if not isinstance(folders, list) or not all(isinstance(f, str) and f for f in folders):
+        raise WorkflowError("'folders' must be a list of paths")
+    for folder in folders:
+        if Path(folder).is_absolute() or ".." in Path(folder).parts:
+            raise WorkflowError(f"folder '{folder}' must be a relative path inside the project")
 
 
 def check_model(value, where):

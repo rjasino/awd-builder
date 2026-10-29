@@ -7,6 +7,7 @@ from pathlib import Path
 from .lib import (
     EVAL_CREATOR_DIR,
     PLAN_FILE,
+    PLAN_TEMPLATE,
     TOOLS,
     WorkflowError,
     components,
@@ -14,6 +15,7 @@ from .lib import (
     load_plan,
     run_agent,
     run_checked,
+    write_template,
 )
 
 EXTERNAL_SKILLS = (
@@ -146,8 +148,20 @@ def scaffold(plan, target, dry_run):
         raise WorkflowError(f"these components failed: {', '.join(failures)}")
 
 
+def run_init(args):
+    target = Path(args.path).resolve()
+    try:
+        dest = write_template(PLAN_TEMPLATE, target, PLAN_FILE, args.force)
+    except WorkflowError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    print(f"Wrote {dest}")
+    print(f'Edit it, then run: awd-builder scaffold run "{target}"')
+    return 0
+
+
 def run(args):
-    target = Path(args.target).resolve()
+    target = Path(args.path).resolve()
     try:
         plan = load_plan(target / args.plan)
         model_note = f" (default model: {plan['model']})" if plan.get("model") else ""
@@ -160,13 +174,21 @@ def run(args):
         return 2
 
     print("\nDone. Next: ask your agent to use the eval-creator skill to create the routing evals,")
-    print(f'then run: awd-builder evals --target "{target}"')
+    print(f'then run: awd-builder evals "{target}"')
     return 0
 
 
 def register(subparsers):
-    parser = subparsers.add_parser("scaffold", help="scaffold the workflow described in the plan")
-    parser.add_argument("--target", default=".", help="project folder to scaffold into (default: current folder)")
-    parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to --target (default: {PLAN_FILE})")
-    parser.add_argument("--dry-run", action="store_true", help="print what would happen, including prompts, and change nothing")
-    parser.set_defaults(func=run)
+    parser = subparsers.add_parser("scaffold", help="create an agentic workflow from a plan file")
+    actions = parser.add_subparsers(dest="action", required=True, metavar="action")
+
+    init = actions.add_parser("init", help=f"write a {PLAN_FILE} template into a project")
+    init.add_argument("path", help='project folder, for example "." for the current folder')
+    init.add_argument("--force", action="store_true", help="overwrite an existing plan")
+    init.set_defaults(func=run_init)
+
+    run_parser = actions.add_parser("run", help="scaffold the workflow described in the plan")
+    run_parser.add_argument("path", help='project folder, for example "." for the current folder')
+    run_parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to the project folder (default: {PLAN_FILE})")
+    run_parser.add_argument("--dry-run", action="store_true", help="print what would happen, including prompts, and change nothing")
+    run_parser.set_defaults(func=run)

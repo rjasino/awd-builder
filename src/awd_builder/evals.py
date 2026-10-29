@@ -70,7 +70,7 @@ def parse_route(output):
 
 
 def run(args):
-    target = Path(args.target).resolve()
+    target = Path(args.path).resolve()
     try:
         plan = load_plan(target / args.plan)
         cases = load_cases(target / args.evals, plan)
@@ -126,9 +126,9 @@ def run(args):
 
 def register(subparsers):
     parser = subparsers.add_parser("evals", help="run the routing evals against the scaffolded workflow")
-    parser.add_argument("--target", default=".", help="project folder to test (default: current folder)")
-    parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to --target (default: {PLAN_FILE})")
-    parser.add_argument("--evals", default=EVAL_FILE, help=f"eval file, relative to --target (default: {EVAL_FILE})")
+    parser.add_argument("path", help='project folder to test, for example "." for the current folder')
+    parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to the project folder (default: {PLAN_FILE})")
+    parser.add_argument("--evals", default=EVAL_FILE, help=f"eval file, relative to the project folder (default: {EVAL_FILE})")
     parser.add_argument("--only", action="append", default=[], metavar="ID", help="run only this case id (repeatable)")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds per case (default: %(default)s)")
     parser.add_argument("--dry-run", action="store_true", help="print the routing prompts without calling the agent")
