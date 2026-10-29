@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "awd-builder"
-version = "0.1.1"
+dynamic = ["version"]
 description = "Scaffold agentic workflows (agents, skills, commands, folders, routing evals) for Claude Code and OpenCode from a YAML plan."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -18,6 +18,9 @@ classifiers = [
 
 [project.scripts]
 awd-builder = "awd_builder.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "awd_builder.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

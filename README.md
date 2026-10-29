@@ -30,6 +30,12 @@ pipx install git+https://github.com/rjasino/awd-builder.git@v0.1.0
 
 Upgrade later with `pipx upgrade awd-builder`.
 
+From a clone of this repo, `scripts/install.py` installs or upgrades to the version in `src/awd_builder/__init__.py`. It does nothing when that version is already installed, so it is safe to run again after each version bump:
+
+```
+python scripts/install.py
+```
+
 ## Quick start
 
 1. Create a plan in your project:
