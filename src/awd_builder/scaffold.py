@@ -165,6 +165,19 @@ def install_memory_files(target, tool, dry_run):
         print("  .gitignore already excludes private memory")
 
 
+def copy_missing_files(source_dir, destination_dir):
+    """Copy files that are not already present, preserving user changes."""
+    installed = False
+    for source in source_dir.rglob("*"):
+        if source.is_file():
+            destination = destination_dir / source.relative_to(source_dir)
+            if not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+                installed = True
+    return installed
+
+
 def scaffold(plan, target, dry_run):
     tool_name = plan["tool"]
     tool = TOOLS[tool_name]
@@ -188,8 +201,14 @@ def scaffold(plan, target, dry_run):
             print(f"  ok {folder}")
 
     print_step("External skills (skill-creator, command-creator)")
-    npx = "npx" if dry_run else find_executable("npx")
+    npx = "npx" if dry_run else None
     for repo, skill in EXTERNAL_SKILLS:
+        skill_dst = target / tool["skills_dir"] / skill
+        if skill_dst.exists():
+            print(f"  {'would keep' if dry_run else 'kept'} existing {skill}")
+            continue
+        if npx is None:
+            npx = find_executable("npx")
         args = [npx, "--yes", "skills", "add", repo, "--skill", skill, "-a", tool["skills_agent"], "--copy", "-y"]
         if dry_run:
             print(f"  would run: {' '.join(args)}")
@@ -200,10 +219,12 @@ def scaffold(plan, target, dry_run):
     print_step("Local skill: eval-creator")
     eval_dst = target / tool["skills_dir"] / "eval-creator"
     if dry_run:
-        print(f"  would copy {EVAL_CREATOR_DIR} -> {eval_dst}")
+        print(f"  would copy missing files from {EVAL_CREATOR_DIR} to {eval_dst} (existing files kept)")
     else:
-        shutil.copytree(EVAL_CREATOR_DIR, eval_dst, dirs_exist_ok=True)
-        print(f"  ok {eval_dst.relative_to(target)}")
+        if copy_missing_files(EVAL_CREATOR_DIR, eval_dst):
+            print(f"  installed missing files in {eval_dst.relative_to(target)}")
+        else:
+            print(f"  kept existing {eval_dst.relative_to(target)}")
 
     install_memory_files(target, tool, dry_run)
 
@@ -214,6 +235,11 @@ def scaffold(plan, target, dry_run):
         name = str(item["name"])
         agent_model = (item.get("model") or default_model) if kind == "agent" else None
         prompt, rel_path = build_prompt(kind, item, tool_name, agent_model)
+        component_path = target / rel_path
+        if component_path.exists():
+            action = "would keep" if dry_run else "kept"
+            print(f"  [{kind}] {name} -> {rel_path} ({action} existing file)")
+            continue
         if dry_run:
             print(f"  [{kind}] {name} -> {rel_path}")
             print("  ---- prompt ----")

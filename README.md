@@ -59,6 +59,8 @@ python scripts/install.py
 
    The generated workflow has private, project-local memory at `.awd-builder/memory/memories.json`; the scaffold adds it to the project's `.gitignore`. Generated agents are instructed to recall relevant memories and ask before saving useful new information. Use `/memory remember`, `/memory recall`, `/memory forget`, `/memory compact`, `/memory export`, or `/memory import` to manage it. Memory export/import are performed by the generated workflow, not by `awd-builder`. The built-in skill/command names `workflow-memory` and `memory` are reserved.
 
+   Re-running `scaffold run` is safe: it creates missing planned components and keeps existing agent, skill, command, and bundled-skill files unchanged. Existing external skills are not reinstalled. To regenerate a component, remove its output file or skill directory first, then run the scaffold again.
+
 3. Create routing evals. In the project, ask your agent to use the `eval-creator` skill. It writes `evals/routing.yaml`.
 
 4. Run the routing evals:
@@ -67,7 +69,7 @@ python scripts/install.py
    awd-builder evals <project>
    ```
 
-   Options: `--dry-run` prints the prompts without calling the agent, `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration error.
+   Each run saves a JSON report to `<project>/evals/results.json`, including per-case expected and actual routes, pass status, and agent output. This file is overwritten on each run. Use `--output <path>` to choose another project-relative path. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error.
 
 ## Application projects (Spec Kit)
 
@@ -96,7 +98,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
 | ------------------------------ | ----------------------------------------------------------------- |
 | `awd-builder scaffold init <p>` | Write a `workflow-plan.yaml` template into a project              |
 | `awd-builder scaffold run <p>`  | Create the folders, external skills, planned components, and private memory |
-| `awd-builder evals <p>`        | Run the routing evals in `evals/routing.yaml`                     |
+| `awd-builder evals <p>`        | Run routing evals and save a JSON report to `evals/results.json`   |
 | `awd-builder app init <p>`     | Write an `app-workflow-plan.yaml` template into a project         |
 | `awd-builder app run <p>`      | Scaffold the application project with Spec Kit from the plan      |
 

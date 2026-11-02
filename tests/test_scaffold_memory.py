@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -120,6 +121,74 @@ class MemoryScaffoldTests(unittest.TestCase):
             with self.assertRaisesRegex(WorkflowError, "reserved"):
                 scaffold(plan, target, dry_run=False)
             self.assertFalse((target / ".claude").exists())
+
+    def test_rerun_keeps_existing_components_and_only_generates_missing_ones(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            tool = TOOLS["claude-code"]
+            existing_paths = (
+                target / tool["agents_dir"] / "existing-agent.md",
+                target / tool["skills_dir"] / "existing-skill" / "SKILL.md",
+                target / tool["commands_dir"] / "existing-command.md",
+            )
+            for path in existing_paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("customized", encoding="utf-8")
+
+            for external_skill in ("skill-creator", "command-creator"):
+                (target / tool["skills_dir"] / external_skill).mkdir(parents=True)
+
+            eval_file = target / tool["skills_dir"] / "eval-creator" / "SKILL.md"
+            eval_file.parent.mkdir(parents=True)
+            eval_file.write_text("customized eval skill", encoding="utf-8")
+
+            plan = {
+                "tool": "claude-code",
+                "agents": [
+                    {"name": "existing-agent", "description": "Existing"},
+                    {"name": "new-agent", "description": "New"},
+                ],
+                "skills": [
+                    {"name": "existing-skill", "description": "Existing"},
+                    {"name": "new-skill", "description": "New"},
+                ],
+                "commands": [
+                    {"name": "existing-command", "description": "Existing"},
+                    {"name": "new-command", "description": "New"},
+                ],
+            }
+
+            def generate_component(_tool_name, prompt, cwd, **_kwargs):
+                rel_path = next(
+                    line[len("Write exactly one file: "):]
+                    for line in prompt.splitlines()
+                    if line.startswith("Write exactly one file: ")
+                )
+                destination = Path(cwd) / rel_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text("generated", encoding="utf-8")
+                return 0, "", ""
+
+            with patch("awd_builder.scaffold.run_agent", side_effect=generate_component) as run_agent, \
+                    patch("awd_builder.scaffold.find_executable") as find_executable, \
+                    patch("awd_builder.scaffold.run_checked") as run_checked, \
+                    redirect_stdout(StringIO()):
+                scaffold(plan, target, dry_run=False)
+                scaffold(plan, target, dry_run=False)
+
+            self.assertEqual(run_agent.call_count, 3)
+            find_executable.assert_not_called()
+            run_checked.assert_not_called()
+            for path in existing_paths:
+                self.assertEqual(path.read_text(encoding="utf-8"), "customized")
+            self.assertEqual(eval_file.read_text(encoding="utf-8"), "customized eval skill")
+            for kind, name in (("agents", "new-agent"), ("skills", "new-skill"), ("commands", "new-command")):
+                rel_path = {
+                    "agents": f"{tool['agents_dir']}/{name}.md",
+                    "skills": f"{tool['skills_dir']}/{name}/SKILL.md",
+                    "commands": f"{tool['commands_dir']}/{name}.md",
+                }[kind]
+                self.assertEqual((target / rel_path).read_text(encoding="utf-8"), "generated")
 
 
 if __name__ == "__main__":
