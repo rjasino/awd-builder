@@ -127,6 +127,48 @@ pip install -e .
 awd-builder --help
 ```
 
+### Test the checkout in a temporary environment (Windows PowerShell)
+
+To try the current checkout without changing a globally installed `awd-builder`, create a virtual environment outside the repository. Run these commands from the repository root and use a disposable test project; a normal scaffold run can invoke external installers and agent generators.
+
+```powershell
+$testRoot = Join-Path $env:TEMP "awd-builder-test-$(Get-Date -Format yyyyMMdd-HHmmss)"
+py -3.13 -m venv "$testRoot\venv"
+& "$testRoot\venv\Scripts\python.exe" -m pip install -e .
+& "$testRoot\venv\Scripts\awd-builder.exe" --version
+& "$testRoot\venv\Scripts\awd-builder.exe" scaffold run "C:\path\to\test-project" --dry-run
+```
+
+After reviewing the dry run, omit `--dry-run` to scaffold the test project. Change `3.13` to an installed Python version 3.9 or newer if needed. This environment uses the current source checkout and does not replace the global CLI. Removing it does **not** undo files written to the test project.
+
+When finished, remove only the temporary environment:
+
+```powershell
+Remove-Item -Recurse -Force "$testRoot"
+```
+
+Local testing does not require a Git tag or push. Tag and push only when you intend to publish the tested code.
+
+### Tag and push a release
+
+1. Update `__version__` in `src/awd_builder/__init__.py` to the next unused version (for example, `0.1.6`), then run the tests and review `git status`.
+2. Commit the release changes, then create a tag whose version matches `__version__`. Do not reuse an existing tag.
+
+   ```powershell
+   git add <the-files-being-released>
+   git commit -m "Release v0.1.6"
+   git tag v0.1.6
+   ```
+
+3. Push the branch and the tag to GitHub:
+
+   ```powershell
+   git push origin main
+   git push origin v0.1.6
+   ```
+
+   Replace `0.1.6` with the version you set, and `main` with the release branch if different. The tag makes the release installable using the version-pinning command in [Install](#install).
+
 Source layout:
 
 | Path                                   | Purpose                                 |
