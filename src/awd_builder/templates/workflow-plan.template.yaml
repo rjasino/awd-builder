@@ -42,6 +42,7 @@ skills:
       Note any missing tests. Suggest fixes but do not apply them.
 
 # Slash commands to create. Each one becomes a markdown file in the tool's commands folder.
+# The built-in /memory command is scaffolded separately; do not name a custom command "memory".
 commands:
   - name: review
     description: Review the given files or paths for bugs and missing tests.

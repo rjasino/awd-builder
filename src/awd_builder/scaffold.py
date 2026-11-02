@@ -6,6 +6,12 @@ from pathlib import Path
 
 from .lib import (
     EVAL_CREATOR_DIR,
+    MEMORY_COMMAND_FILE,
+    MEMORY_DIR,
+    MEMORY_FILE,
+    MEMORY_GITIGNORE,
+    MEMORY_SKILL_DIR,
+    MEMORY_SKILL_NAME,
     PLAN_FILE,
     PLAN_TEMPLATE,
     TOOLS,
@@ -33,6 +39,9 @@ AGENT_FORMAT_HINTS = {
     ),
 }
 AGENT_TIMEOUT = 900
+MEMORY_AGENT_POLICY = f"""\
+This workflow has private, consent-based memory. Before relevant work, consult the `{MEMORY_SKILL_NAME}` skill and recall only memories relevant to the current request. When a meaningful, potentially reusable preference, decision, convention, or fact is discovered or discussed, ask the user whether it should be saved. Never save anything without explicit approval. Follow the memory skill for every memory operation; do not silently edit the memory store or store credentials/secrets.
+"""
 
 
 def item_path(kind, name, tool):
@@ -62,6 +71,8 @@ def build_prompt(kind, item, tool_name, agent_model=None):
             f'Using the skill-creator skill\'s guidance on writing clear, well-scoped instructions, '
             f'create one {tool["label"]} subagent named "{name}".\n\n'
             f"{AGENT_FORMAT_HINTS[tool_name]}{model_hint}\n\n"
+            "Make the `workflow-memory` skill available to this agent: for Claude Code, include it in the agent's `skills` frontmatter; for OpenCode, direct the agent to load/use the skill through OpenCode's skill mechanism. "
+            f"Include this mandatory memory policy in the agent's system prompt:\n{MEMORY_AGENT_POLICY}\n"
         )
     elif kind == "skill":
         body = (
@@ -87,12 +98,88 @@ def print_step(title):
     print(f"\n== {title}")
 
 
+def ensure_gitignore(target):
+    """Ignore the private workflow memory without replacing project ignore rules."""
+    path = target / ".gitignore"
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    rules = {line.strip() for line in existing.splitlines()}
+    if any(rule in rules for rule in (
+        MEMORY_GITIGNORE,
+        MEMORY_GITIGNORE.rstrip("/"),
+        MEMORY_GITIGNORE.lstrip("/"),
+        MEMORY_GITIGNORE.lstrip("/").rstrip("/"),
+    )):
+        return False
+
+    addition = f"# Private awd-builder workflow memory\n{MEMORY_GITIGNORE}\n"
+    separator = "" if not existing or existing.endswith(("\n", "\r")) else "\n"
+    path.write_text(existing + separator + addition, encoding="utf-8")
+    return True
+
+
+def install_memory_files(target, tool, dry_run):
+    print_step("Workflow memory")
+    skill_dst = target / tool["skills_dir"] / MEMORY_SKILL_NAME
+    command_dst = target / tool["commands_dir"] / "memory.md"
+    memory_file = target / MEMORY_FILE
+    gitignore = target / ".gitignore"
+
+    if dry_run:
+        print(f"  would copy {MEMORY_SKILL_DIR} -> {skill_dst}")
+        print(f"  would install /memory command -> {command_dst}")
+        print(f"  would initialize {memory_file} if it does not exist")
+        print(f"  would add {MEMORY_GITIGNORE} to {gitignore} if needed")
+        return
+
+    skill_dst.mkdir(parents=True, exist_ok=True)
+    skill_installed = False
+    for source in MEMORY_SKILL_DIR.rglob("*"):
+        if source.is_file():
+            destination = skill_dst / source.relative_to(MEMORY_SKILL_DIR)
+            if not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+                skill_installed = True
+    if skill_installed:
+        print(f"  installed missing files in {skill_dst.relative_to(target)}")
+    else:
+        print(f"  kept existing {skill_dst.relative_to(target)}")
+
+    if not command_dst.exists():
+        command_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(MEMORY_COMMAND_FILE, command_dst)
+        print(f"  ok {command_dst.relative_to(target)}")
+    else:
+        print(f"  kept existing {command_dst.relative_to(target)}")
+
+    memory_file.parent.mkdir(parents=True, exist_ok=True)
+    if not memory_file.exists():
+        memory_file.write_text('{\n  "version": 1,\n  "memories": []\n}\n', encoding="utf-8")
+        print(f"  initialized {MEMORY_FILE}")
+    else:
+        print(f"  kept existing {MEMORY_FILE}")
+
+    if ensure_gitignore(target):
+        print(f"  added {MEMORY_GITIGNORE} to .gitignore")
+    else:
+        print("  .gitignore already excludes private memory")
+
+
 def scaffold(plan, target, dry_run):
     tool_name = plan["tool"]
     tool = TOOLS[tool_name]
 
+    reserved = {
+        ("skill", MEMORY_SKILL_NAME): "the built-in workflow memory skill",
+        ("command", "memory"): "the built-in workflow memory command",
+    }
+    for kind, item in components(plan):
+        if (kind, item["name"]) in reserved:
+            raise WorkflowError(f"{kind} name '{item['name']}' is reserved for {reserved[(kind, item['name'])]}")
+
     print_step("Folders")
-    folders = [*(plan.get("folders") or []), tool["agents_dir"], tool["commands_dir"], tool["skills_dir"]]
+
+    folders = [*(plan.get("folders") or []), tool["agents_dir"], tool["commands_dir"], tool["skills_dir"], MEMORY_DIR]
     for folder in dict.fromkeys(folders):
         if dry_run:
             print(f"  would create {folder}")
@@ -117,6 +204,8 @@ def scaffold(plan, target, dry_run):
     else:
         shutil.copytree(EVAL_CREATOR_DIR, eval_dst, dirs_exist_ok=True)
         print(f"  ok {eval_dst.relative_to(target)}")
+
+    install_memory_files(target, tool, dry_run)
 
     print_step("Agents, skills and commands")
     default_model = plan.get("model")
@@ -173,7 +262,12 @@ def run(args):
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    print("\nDone. Next: ask your agent to use the eval-creator skill to create the routing evals,")
+    if args.dry_run:
+        print("\nDry run complete. No files were changed.")
+        return 0
+
+    print("\nDone. The private memory skill and /memory command are ready in the scaffolded workflow.")
+    print("Ask your agent to use the eval-creator skill to create the routing evals,")
     print(f'then run: awd-builder evals "{target}"')
     return 0
 

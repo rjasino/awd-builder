@@ -1,6 +1,6 @@
 # awd-builder
 
-Scaffold an agentic workflow (agents, skills, commands, folders, and routing evals) for Claude Code or OpenCode from one YAML plan.
+Scaffold an agentic workflow (agents, skills, commands, private memory, folders, and routing evals) for Claude Code or OpenCode from one YAML plan.
 
 ## Prerequisites
 
@@ -55,7 +55,9 @@ python scripts/install.py
    awd-builder scaffold run <project>
    ```
 
-   The scaffold creates the folders, installs `skill-creator` (anthropics/skills) and `command-creator` (softaworks/agent-toolkit) with `npx skills`, copies the `eval-creator` skill into the project, then asks your agent to write each agent, skill, and command. Each agent call costs tokens, so use `--dry-run` first.
+   The scaffold creates the folders, installs `skill-creator` (anthropics/skills) and `command-creator` (softaworks/agent-toolkit) with `npx skills`, copies the built-in `eval-creator` and `workflow-memory` skills, installs a `/memory` command, and then asks your agent to write each planned agent, skill, and command. Each agent call costs tokens, so use `--dry-run` first.
+
+   The generated workflow has private, project-local memory at `.awd-builder/memory/memories.json`; the scaffold adds it to the project's `.gitignore`. Generated agents are instructed to recall relevant memories and ask before saving useful new information. Use `/memory remember`, `/memory recall`, `/memory forget`, `/memory compact`, `/memory export`, or `/memory import` to manage it. Memory export/import are performed by the generated workflow, not by `awd-builder`. The built-in skill/command names `workflow-memory` and `memory` are reserved.
 
 3. Create routing evals. In the project, ask your agent to use the `eval-creator` skill. It writes `evals/routing.yaml`.
 
@@ -93,7 +95,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
 | Command                        | Purpose                                                           |
 | ------------------------------ | ----------------------------------------------------------------- |
 | `awd-builder scaffold init <p>` | Write a `workflow-plan.yaml` template into a project              |
-| `awd-builder scaffold run <p>`  | Create the folders, external skills, and components from the plan |
+| `awd-builder scaffold run <p>`  | Create the folders, external skills, planned components, and private memory |
 | `awd-builder evals <p>`        | Run the routing evals in `evals/routing.yaml`                     |
 | `awd-builder app init <p>`     | Write an `app-workflow-plan.yaml` template into a project         |
 | `awd-builder app run <p>`      | Scaffold the application project with Spec Kit from the plan      |
@@ -110,6 +112,7 @@ Run any command with `--help` for all options.
 | Skills        | `.claude/skills/<name>/SKILL.md`           | `.opencode/skills/<name>/SKILL.md` |
 | Commands      | `.claude/commands/<name>.md`               | `.opencode/commands/<name>.md`     |
 | Routing evals | `evals/routing.yaml` (same for both tools) |                                    |
+| Private memory | `.awd-builder/memory/memories.json` (ignored by git) | `.awd-builder/memory/memories.json` (ignored by git) |
 
 The external `skill-creator` and `command-creator` skills are installed by `npx skills`. They go to `.claude/skills/` for Claude Code and to `.agents/skills/` for OpenCode, which reads that folder too.
 
@@ -135,4 +138,6 @@ Source layout:
 | `src/awd_builder/lib.py`               | Plan validation and agent CLI helpers   |
 | `src/awd_builder/templates/`           | Plan template                           |
 | `src/awd_builder/skills/eval-creator/` | Skill that writes the routing eval file |
+| `src/awd_builder/skills/workflow-memory/` | Private memory instructions copied into scaffolded workflows |
+| `src/awd_builder/commands/`           | Built-in workflow commands copied into projects |
 | `docs/`                                | Notes and the original plan             |

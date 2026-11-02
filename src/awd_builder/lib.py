@@ -12,12 +12,18 @@ NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PLAN_FILE = "workflow-plan.yaml"
 APP_PLAN_FILE = "app-workflow-plan.yaml"
 EVAL_FILE = "evals/routing.yaml"
+MEMORY_DIR = ".awd-builder/memory"
+MEMORY_FILE = f"{MEMORY_DIR}/memories.json"
+MEMORY_GITIGNORE = f"/{MEMORY_DIR}/"
+MEMORY_SKILL_NAME = "workflow-memory"
 ITEM_KINDS = ("agents", "skills", "commands")
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PLAN_TEMPLATE = PACKAGE_DIR / "templates" / "workflow-plan.template.yaml"
 APP_PLAN_TEMPLATE = PACKAGE_DIR / "templates" / "app-workflow-plan.template.yaml"
 EVAL_CREATOR_DIR = PACKAGE_DIR / "skills" / "eval-creator"
+MEMORY_SKILL_DIR = PACKAGE_DIR / "skills" / MEMORY_SKILL_NAME
+MEMORY_COMMAND_FILE = PACKAGE_DIR / "commands" / "memory.md"
 
 TOOLS = {
     "claude-code": {

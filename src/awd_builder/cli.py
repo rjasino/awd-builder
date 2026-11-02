@@ -10,8 +10,8 @@ def build_parser():
         prog="awd-builder",
         description=(
             "Scaffold agentic workflows (agents, skills, commands, folders) for Claude Code "
-            "or OpenCode from a YAML plan, run workflow-wide routing evals, and scaffold "
-            "application projects with GitHub Spec Kit."
+            "or OpenCode from a YAML plan, including private workflow memory; run routing evals "
+            "and scaffold application projects with GitHub Spec Kit."
         ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
