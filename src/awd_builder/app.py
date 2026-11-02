@@ -61,7 +61,11 @@ def add_to_path(folder):
 
 
 def json_output(args, cwd):
-    return json.loads(run_checked(args, cwd).stdout)
+    result = run_checked(args, cwd)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise WorkflowError(f"Spec Kit returned invalid JSON for {' '.join(args)}") from error
 
 
 def ensure_tools(dry_run):
@@ -136,10 +140,27 @@ def setup_speckit(integration, extensions, target, dry_run):
     initialized = (target / ".specify").is_dir()
     installed_integrations = []
     installed_extensions = []
+    if dry_run and initialized and not specify:
+        print("  cannot inspect installed integrations or extensions because specify is not installed")
+        print("  install Spec Kit, then rerun --dry-run to see which setup actions are needed")
+        return
     if specify and initialized:
-        status = json_output([specify, "integration", "status", "--json"], target)
+        try:
+            status = json_output([specify, "integration", "status", "--json"], target)
+            extension_rows = json_output([specify, "extension", "list", "--json"], target)
+        except WorkflowError as error:
+            raise WorkflowError(
+                f"could not inspect existing Spec Kit state in {target / '.specify'}; "
+                f"no re-initialization was attempted: {error}"
+            ) from error
+        if not isinstance(status, dict) or not isinstance(status.get("installed_integrations", []), list):
+            raise WorkflowError(f"Spec Kit returned an invalid integration status for {target}")
+        if not isinstance(extension_rows, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get("id"), str) for item in extension_rows
+        ):
+            raise WorkflowError(f"Spec Kit returned an invalid extension list for {target}")
         installed_integrations = status.get("installed_integrations") or []
-        installed_extensions = [item["id"] for item in json_output([specify, "extension", "list", "--json"], target)]
+        installed_extensions = [item["id"] for item in extension_rows]
     specify = specify or "specify"
 
     if not initialized:

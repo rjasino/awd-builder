@@ -90,7 +90,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
    awd-builder app run <project>
    ```
 
-   The scaffold installs `uv` if it is missing, then installs the latest `specify-cli` with `uv tool install` if `specify` is missing. It checks the integration key against `specify integration list` and stops before changing anything if the key is not supported. Then it creates the folders, runs `specify init --integration <key>`, and installs the extensions. Running it again skips what is already in place.
+   The scaffold installs `uv` if it is missing, then installs the latest `specify-cli` with `uv tool install` if `specify` is missing. It checks the integration key against `specify integration list` and stops before changing anything if the key is not supported. Then it creates the folders, initializes a new Spec Kit project, and installs only missing integrations and extensions. Re-running it with the same plan skips what is already in place. Removing an integration or extension from the plan does not uninstall it; existing project setup is left intact. If Spec Kit cannot report the state of an existing `.specify` project, the command fails safely rather than reinitializing it. A dry run without `specify` installed cannot determine which existing integrations or extensions are present.
 
 ## Commands
 
