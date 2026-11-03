@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from awd_builder.app import setup_speckit  # noqa: E402
+from awd_builder.app import app_integration_keys, setup_speckit, validate_app_plan  # noqa: E402
 from awd_builder.lib import WorkflowError  # noqa: E402
 
 
@@ -75,6 +75,26 @@ class AppScaffoldIdempotencyTests(unittest.TestCase):
                 setup_speckit("claude", ["assess"], self.target, dry_run=False)
 
         self.assertEqual(self.commands, [["integration", "status", "--json"]])
+
+    def test_app_plan_accepts_multiple_harnesses_and_maps_spec_kit_keys(self):
+        plan = {
+            "name": "sample",
+            "harnesses": ["claude-code", "codex", "github-copilot", "cursor"],
+            "extensions": [],
+        }
+        validate_app_plan(plan)
+        self.assertEqual(app_integration_keys(plan), ["claude", "codex", "copilot", "cursor-agent"])
+
+    def test_new_project_initializes_first_harness_and_installs_the_rest(self):
+        (self.target / ".specify").rmdir()
+        with patch("awd_builder.app.shutil.which", return_value="specify"), \
+                patch("awd_builder.app.run_checked", side_effect=self.installed_state), \
+                redirect_stdout(StringIO()):
+            setup_speckit(["claude", "codex"], ["assess"], self.target, dry_run=False)
+
+        self.assertIn(["init", "--here", "--integration", "claude", "--force", "--non-interactive"], self.commands)
+        self.assertIn(["integration", "install", "codex"], self.commands)
+        self.assertIn(["extension", "add", "assess"], self.commands)
 
 
 if __name__ == "__main__":

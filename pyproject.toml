@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "awd-builder"
 dynamic = ["version"]
-description = "Scaffold agentic workflows (agents, skills, commands, private memory, folders, routing evals) for Claude Code and OpenCode from a YAML plan."
+description = "Scaffold canonical agent workflows and sync them to OpenCode, Claude Code, Codex, GitHub Copilot, Pi, and Cursor from YAML plans."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["PyYAML>=6.0"]

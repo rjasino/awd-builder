@@ -6,7 +6,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .lib import EVAL_FILE, PLAN_FILE, WorkflowError, components, load_plan, load_yaml, run_agent
+from .lib import (
+    EVAL_FILE,
+    PLAN_FILE,
+    WorkflowError,
+    components,
+    load_plan,
+    load_yaml,
+    run_agent,
+    workflow_generator,
+    workflow_harnesses,
+)
 
 DEFAULT_TIMEOUT = 300
 DEFAULT_RESULTS_FILE = "evals/results.json"
@@ -79,7 +89,8 @@ def save_results(path, plan, evals_path, results):
         "version": 1,
         "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "workflow": plan["name"],
-        "tool": plan["tool"],
+        "tool": workflow_generator(plan),
+        "harnesses": workflow_harnesses(plan),
         "model": plan.get("model"),
         "evals_file": str(evals_path),
         "summary": {
@@ -121,7 +132,7 @@ def run(args):
             print(ROUTING_PROMPT.format(prompt=case["prompt"]))
         return 0
 
-    tool = plan["tool"]
+    tool = workflow_generator(plan)
     model = plan.get("model")
     model_note = f" model {model}" if model else ""
     print(f"Running {len(cases)} routing case(s) for '{plan['name']}' with {tool}{model_note}\n")

@@ -5,9 +5,15 @@
 # Name of the application project.
 name: my-app
 
-# Spec Kit integration key for your coding agent, for example claude, codex,
-# copilot, cursor-agent, opencode or pi. Run `specify integration list` for all keys.
-integration: claude
+# Harnesses to initialize in the same project. awd-builder maps these names to
+# Spec Kit integration keys (for example claude-code -> claude and cursor -> cursor-agent).
+harnesses:
+  - claude-code
+  # - opencode
+  # - codex
+  # - github-copilot
+  # - pi
+  # - cursor
 
 # Folders to create in the project, relative to the project folder.
 folders:

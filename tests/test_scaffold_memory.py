@@ -10,6 +10,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from awd_builder.lib import (  # noqa: E402
+    CANONICAL_AGENTS,
+    CANONICAL_COMMANDS,
+    CANONICAL_SKILLS,
     MEMORY_FILE,
     MEMORY_GITIGNORE,
     MEMORY_SKILL_NAME,
@@ -25,7 +28,7 @@ from awd_builder.scaffold import (  # noqa: E402
 
 
 class MemoryScaffoldTests(unittest.TestCase):
-    def test_installs_memory_for_each_supported_tool(self):
+    def test_installs_memory_in_canonical_agents_directories(self):
         for tool_name in ("claude-code", "opencode"):
             with self.subTest(tool=tool_name), tempfile.TemporaryDirectory() as temp:
                 target = Path(temp)
@@ -34,9 +37,8 @@ class MemoryScaffoldTests(unittest.TestCase):
                 with redirect_stdout(StringIO()):
                     install_memory_files(target, TOOLS[tool_name], dry_run=False)
 
-                tool = TOOLS[tool_name]
-                self.assertTrue((target / tool["skills_dir"] / MEMORY_SKILL_NAME / "SKILL.md").is_file())
-                self.assertTrue((target / tool["commands_dir"] / "memory.md").is_file())
+                self.assertTrue((target / CANONICAL_SKILLS / MEMORY_SKILL_NAME / "SKILL.md").is_file())
+                self.assertTrue((target / CANONICAL_COMMANDS / "memory.md").is_file())
                 self.assertEqual(
                     json.loads((target / MEMORY_FILE).read_text(encoding="utf-8")),
                     {"version": 1, "memories": []},
@@ -48,19 +50,18 @@ class MemoryScaffoldTests(unittest.TestCase):
     def test_re_run_preserves_user_memory_and_customized_builtin_files(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp)
-            tool = TOOLS["claude-code"]
             with redirect_stdout(StringIO()):
-                install_memory_files(target, tool, dry_run=False)
+                install_memory_files(target, TOOLS["claude-code"], dry_run=False)
 
             memory_file = target / MEMORY_FILE
             memory_file.write_text('{"version": 1, "memories": [{"id": "keep-me"}]}', encoding="utf-8")
-            skill_file = target / tool["skills_dir"] / MEMORY_SKILL_NAME / "SKILL.md"
+            skill_file = target / CANONICAL_SKILLS / MEMORY_SKILL_NAME / "SKILL.md"
             skill_file.write_text("customized skill", encoding="utf-8")
-            command_file = target / tool["commands_dir"] / "memory.md"
+            command_file = target / CANONICAL_COMMANDS / "memory.md"
             command_file.write_text("customized command", encoding="utf-8")
 
             with redirect_stdout(StringIO()):
-                install_memory_files(target, tool, dry_run=False)
+                install_memory_files(target, TOOLS["claude-code"], dry_run=False)
 
             self.assertIn("keep-me", memory_file.read_text(encoding="utf-8"))
             self.assertEqual(skill_file.read_text(encoding="utf-8"), "customized skill")
@@ -85,7 +86,7 @@ class MemoryScaffoldTests(unittest.TestCase):
             with redirect_stdout(StringIO()) as output:
                 install_memory_files(target, TOOLS["opencode"], dry_run=True)
 
-            self.assertIn("would install /memory command", output.getvalue())
+            self.assertIn("would install canonical /memory command", output.getvalue())
             self.assertFalse((target / ".gitignore").exists())
             self.assertFalse((target / MEMORY_FILE).exists())
 
@@ -96,7 +97,7 @@ class MemoryScaffoldTests(unittest.TestCase):
             "claude-code",
         )
         self.assertIn("workflow-memory", prompt)
-        self.assertIn("skills` frontmatter", prompt)
+        self.assertIn(".agents/skills/workflow-memory/SKILL.md", prompt)
         self.assertIn("ask the user whether it should be saved", prompt)
         self.assertIn("Never save anything without explicit approval", prompt)
 
@@ -120,16 +121,16 @@ class MemoryScaffoldTests(unittest.TestCase):
             plan = {"tool": "claude-code", "commands": [{"name": "memory", "description": "custom"}]}
             with self.assertRaisesRegex(WorkflowError, "reserved"):
                 scaffold(plan, target, dry_run=False)
-            self.assertFalse((target / ".claude").exists())
+            self.assertFalse((target / ".agents").exists())
 
     def test_rerun_keeps_existing_components_and_only_generates_missing_ones(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp)
             tool = TOOLS["claude-code"]
             existing_paths = (
-                target / tool["agents_dir"] / "existing-agent.md",
-                target / tool["skills_dir"] / "existing-skill" / "SKILL.md",
-                target / tool["commands_dir"] / "existing-command.md",
+                target / CANONICAL_AGENTS / "existing-agent.md",
+                target / CANONICAL_SKILLS / "existing-skill" / "SKILL.md",
+                target / CANONICAL_COMMANDS / "existing-command.md",
             )
             for path in existing_paths:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,7 +139,7 @@ class MemoryScaffoldTests(unittest.TestCase):
             for external_skill in ("skill-creator", "command-creator"):
                 (target / tool["skills_dir"] / external_skill).mkdir(parents=True)
 
-            eval_file = target / tool["skills_dir"] / "eval-creator" / "SKILL.md"
+            eval_file = target / CANONICAL_SKILLS / "eval-creator" / "SKILL.md"
             eval_file.parent.mkdir(parents=True)
             eval_file.write_text("customized eval skill", encoding="utf-8")
 
@@ -166,7 +167,7 @@ class MemoryScaffoldTests(unittest.TestCase):
                 )
                 destination = Path(cwd) / rel_path
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_text("generated", encoding="utf-8")
+                destination.write_text("generated\n", encoding="utf-8")
                 return 0, "", ""
 
             with patch("awd_builder.scaffold.run_agent", side_effect=generate_component) as run_agent, \
@@ -184,11 +185,11 @@ class MemoryScaffoldTests(unittest.TestCase):
             self.assertEqual(eval_file.read_text(encoding="utf-8"), "customized eval skill")
             for kind, name in (("agents", "new-agent"), ("skills", "new-skill"), ("commands", "new-command")):
                 rel_path = {
-                    "agents": f"{tool['agents_dir']}/{name}.md",
-                    "skills": f"{tool['skills_dir']}/{name}/SKILL.md",
-                    "commands": f"{tool['commands_dir']}/{name}.md",
+                    "agents": f".claude/agents/{name}.md",
+                    "skills": f".claude/skills/{name}/SKILL.md",
+                    "commands": f".claude/commands/{name}.md",
                 }[kind]
-                self.assertEqual((target / rel_path).read_text(encoding="utf-8"), "generated")
+                self.assertTrue((target / rel_path).read_text(encoding="utf-8").endswith("generated\n"))
 
 
 if __name__ == "__main__":

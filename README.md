@@ -1,12 +1,12 @@
 # awd-builder
 
-Scaffold an agentic workflow (agents, skills, commands, private memory, folders, and routing evals) for Claude Code or OpenCode from one YAML plan.
+Scaffold one canonical agent workflow and sync it to OpenCode, Claude Code, Codex, GitHub Copilot, Pi, and Cursor from a YAML plan.
 
 ## Prerequisites
 
 - Python 3.9 or newer
 - Node.js (provides `npx`, used to install `skill-creator` and `command-creator`)
-- Claude Code (`claude`) or OpenCode (`opencode`) on your PATH and signed in
+- Claude Code (`claude`) or OpenCode (`opencode`) on your PATH and signed in as the authoring generator
 
 ## Install
 
@@ -44,9 +44,9 @@ python scripts/install.py
    awd-builder scaffold init .
    ```
 
-   Edit `<project>/workflow-plan.yaml`. Set `tool` to `claude-code` or `opencode`, and list the folders, agents, skills, and commands you want.
+   Edit `<project>/workflow-plan.yaml`. Set `generator` to `claude-code` or `opencode` (the CLI that authors canonical files), choose one or more output `harnesses`, and list the folders, agents, skills, and commands you want. Supported output harnesses are `opencode`, `claude-code`, `codex`, `github-copilot`, `pi`, and `cursor`. Existing plans using the old `tool` field remain valid and map that tool as both generator and single output harness.
 
-   Set `model` to the model name your tool accepts, for example `sonnet` for claude-code or `opencode-go/claude-haiku-5-5` for opencode. It is used for scaffolding and the routing evals. Each agent can set its own `model` to override it. Leave both out to use the tool's default.
+   Set `model` to the model name your generator accepts, for example `sonnet` for Claude Code or `opencode-go/claude-haiku-5-5` for OpenCode. It is used for scaffolding and routing evals. Each agent can set its own `model` to override it. Leave it out to use the generator's default.
 
 2. Preview, then scaffold:
 
@@ -55,11 +55,13 @@ python scripts/install.py
    awd-builder scaffold run <project>
    ```
 
-   The scaffold creates the folders, installs `skill-creator` (anthropics/skills) and `command-creator` (softaworks/agent-toolkit) with `npx skills`, copies the built-in `eval-creator` and `workflow-memory` skills, installs a `/memory` command, and then asks your agent to write each planned agent, skill, and command. Each agent call costs tokens, so use `--dry-run` first.
+   The scaffold creates canonical agents, skills, and commands under `.agents/`, asks the selected generator to author missing components, then syncs them to each selected harness. It also installs the generator helpers `skill-creator` and `command-creator` with `npx skills`. Skills use the Agent Skills format in `.agents/skills`; Claude Code and Cursor receive native skill copies because they do not discover that shared directory. Each authoring call costs tokens, so use `--dry-run` first.
 
-   The generated workflow has private, project-local memory at `.awd-builder/memory/memories.json`; the scaffold adds it to the project's `.gitignore`. Generated agents are instructed to recall relevant memories and ask before saving useful new information. Use `/memory remember`, `/memory recall`, `/memory forget`, `/memory compact`, `/memory export`, or `/memory import` to manage it. Memory export/import are performed by the generated workflow, not by `awd-builder`. The built-in skill/command names `workflow-memory` and `memory` are reserved.
+   Canonical source files live in `.agents/agents`, `.agents/skills`, and `.agents/commands`. Use `awd-builder sync <project>` to re-sync after editing canonical files. Synced outputs are tracked in `.awd-builder/sync-manifest.json`; conflicts with untracked or locally modified target files stop the sync. Review before using `awd-builder sync <project> --force`, which overwrites those files. Sync does not delete stale outputs when a component or harness is removed from the plan.
 
-   Re-running `scaffold run` is safe: it creates missing planned components and keeps existing agent, skill, command, and bundled-skill files unchanged. Existing external skills are not reinstalled. To regenerate a component, remove its output file or skill directory first, then run the scaffold again.
+   The generated workflow has private, project-local memory at `.awd-builder/memory/memories.json`; this store is gitignored. Generated agents are instructed to recall relevant memories and ask before saving useful new information. Use `/memory remember`, `/memory recall`, `/memory forget`, `/memory compact`, `/memory export`, or `/memory import` to manage it. The built-in skill/command names `workflow-memory` and `memory` are reserved.
+
+   Re-running `scaffold run` is safe: it creates missing canonical components and syncs target copies. Existing generated files are not regenerated. Edit the canonical file or remove it to change/regenerate a component.
 
 3. Create routing evals. In the project, ask your agent to use the `eval-creator` skill. It writes `evals/routing.yaml`.
 
@@ -81,7 +83,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
    awd-builder app init .
    ```
 
-   Edit `<project>/app-workflow-plan.yaml`. Set `integration` to a Spec Kit integration key such as `claude`, `codex`, `copilot`, `cursor-agent`, `opencode`, or `pi`. Set `folders` and the `extensions` to install (`assess` for idea assessment, `bug` for bug fixing).
+   Edit `<project>/app-workflow-plan.yaml`. Set `harnesses` to one or more of `opencode`, `claude-code`, `codex`, `github-copilot`, `pi`, and `cursor`. `app run` maps these names to Spec Kit integration keys and initializes/installs all selected integrations. Set `folders` and the `extensions` to install (`assess` for idea assessment, `bug` for bug fixing). The older single `integration` field remains supported.
 
 2. Preview, then scaffold:
 
@@ -90,17 +92,18 @@ For building an application rather than an agent workflow, `awd-builder app` set
    awd-builder app run <project>
    ```
 
-   The scaffold installs `uv` if it is missing, then installs the latest `specify-cli` with `uv tool install` if `specify` is missing. It checks the integration key against `specify integration list` and stops before changing anything if the key is not supported. Then it creates the folders, initializes a new Spec Kit project, and installs only missing integrations and extensions. Re-running it with the same plan skips what is already in place. Removing an integration or extension from the plan does not uninstall it; existing project setup is left intact. If Spec Kit cannot report the state of an existing `.specify` project, the command fails safely rather than reinitializing it. A dry run without `specify` installed cannot determine which existing integrations or extensions are present.
+   The scaffold installs `uv` if it is missing, then installs the latest `specify-cli` if `specify` is missing. It verifies every requested integration against `specify integration list`, initializes the project with the first integration, and installs the remaining missing integrations and extensions. Re-running with the same plan skips what is already installed. Removing an integration from the plan does not uninstall it. Use `awd-builder sync <project> --plan app-workflow-plan.yaml` to re-sync canonical skills and workflow components for the app's selected harnesses.
 
 ## Commands
 
 | Command                        | Purpose                                                           |
 | ------------------------------ | ----------------------------------------------------------------- |
 | `awd-builder scaffold init <p>` | Write a `workflow-plan.yaml` template into a project              |
-| `awd-builder scaffold run <p>`  | Create the folders, external skills, planned components, and private memory |
+| `awd-builder scaffold run <p>`  | Generate canonical workflow files and sync the selected harnesses       |
 | `awd-builder evals <p>`        | Run routing evals and save a JSON report to `evals/results.json`   |
+| `awd-builder sync <p>`          | Sync canonical `.agents` components to selected harnesses          |
 | `awd-builder app init <p>`     | Write an `app-workflow-plan.yaml` template into a project         |
-| `awd-builder app run <p>`      | Scaffold the application project with Spec Kit from the plan      |
+| `awd-builder app run <p>`      | Scaffold a Spec Kit app for all selected harness integrations     |
 
 `<p>` is the project folder. Use `.` for the current folder.
 
@@ -108,15 +111,18 @@ Run any command with `--help` for all options.
 
 ## Output locations
 
-| Component     | Claude Code                                | OpenCode                           |
-| ------------- | ------------------------------------------ | ---------------------------------- |
-| Agents        | `.claude/agents/<name>.md`                 | `.opencode/agents/<name>.md`       |
-| Skills        | `.claude/skills/<name>/SKILL.md`           | `.opencode/skills/<name>/SKILL.md` |
-| Commands      | `.claude/commands/<name>.md`               | `.opencode/commands/<name>.md`     |
-| Routing evals | `evals/routing.yaml` (same for both tools) |                                    |
-| Private memory | `.awd-builder/memory/memories.json` (ignored by git) | `.awd-builder/memory/memories.json` (ignored by git) |
+| Harness | Agents | Skills | Commands |
+| --- | --- | --- | --- |
+| OpenCode | `.opencode/agents/` | `.agents/skills/` | `.opencode/commands/` |
+| Claude Code | `.claude/agents/` | `.claude/skills/` (synced from `.agents/skills/`) | `.claude/commands/` |
+| Codex | `.codex/agents/` (TOML) | `.agents/skills/` | `.agents/skills/awd-command-*` fallback |
+| GitHub Copilot | `.github/agents/` | `.agents/skills/` | `.github/prompts/` prompt files |
+| Pi | `.agents/skills/awd-agent-*` fallback | `.agents/skills/` | `.pi/prompts/` |
+| Cursor | `.cursor/agents/` | `.cursor/skills/` (synced from `.agents/skills/`) | `.cursor/commands/` |
 
-The external `skill-creator` and `command-creator` skills are installed by `npx skills`. They go to `.claude/skills/` for Claude Code and to `.agents/skills/` for OpenCode, which reads that folder too.
+All canonical agent and command sources live under `.agents/agents/` and `.agents/commands/`. The generator is currently Claude Code or OpenCode; the target harnesses are configured separately in the plan. Routing evals run through the configured generator. Private memory stays in `.awd-builder/memory/memories.json` and is ignored by git.
+
+The external `skill-creator` and `command-creator` skills are installed by `npx skills` for the selected generator. For Codex and Pi, agents or commands that do not have a native equivalent are exposed as best-effort skills or prompt templates; the sync command reports these fallbacks.
 
 ## Development
 

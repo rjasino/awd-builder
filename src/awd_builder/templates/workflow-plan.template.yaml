@@ -5,14 +5,23 @@
 # Name of the workflow. Used in messages and in the eval file.
 name: my-workflow
 
-# Agentic tool to scaffold for: claude-code or opencode
-tool: claude-code
+# CLI used by awd-builder to author canonical workflow components.
+# Currently supported generators: claude-code or opencode.
+generator: claude-code
 
-# Model passed to the agent CLI for scaffolding and routing evals, and written into
-# agent files that do not set their own. Use a model name the chosen tool accepts:
-# for claude-code, an alias such as sonnet or opus, or a full model ID.
-# for opencode, provider/model, for example opencode-go/claude-haiku-5-5.
-# Leave it out to use the tool's default model.
+# Harnesses to sync the canonical workflow to. Skills use the Agent Skills
+# standard in .agents/skills wherever the harness supports it.
+harnesses:
+  - claude-code
+  # - opencode
+  # - codex
+  # - github-copilot
+  # - pi
+  # - cursor
+
+# Model passed to the generator and routing evals, and written into generated
+# agent files that do not set their own. Use a model name the generator accepts.
+# Leave it out to use the generator's default model.
 model: sonnet
 
 # Folders to create in the project, relative to its root.
@@ -20,7 +29,7 @@ folders:
   - docs
   - scripts
 
-# Subagents to create. Each one becomes an agent file in the tool's agents folder.
+# Agents to create as canonical Markdown files under .agents/agents, then sync.
 agents:
   - name: planner
     description: Breaks a feature request into ordered implementation tasks. Use when the user asks for a plan or a task breakdown before coding.
@@ -31,7 +40,7 @@ agents:
       Produce a numbered task list. Each task has a short title and acceptance criteria.
       Do not edit code.
 
-# Skills to create. Each one becomes a SKILL.md in the tool's skills folder.
+# Skills to create under .agents/skills using the Agent Skills standard.
 # The description is what the agent uses to decide when to load the skill, so make it specific.
 skills:
   - name: code-review
@@ -41,7 +50,7 @@ skills:
       List findings by severity with file and line references.
       Note any missing tests. Suggest fixes but do not apply them.
 
-# Slash commands to create. Each one becomes a markdown file in the tool's commands folder.
+# Commands to create as canonical Markdown files under .agents/commands, then sync.
 # The built-in /memory command is scaffolded separately; do not name a custom command "memory".
 commands:
   - name: review

@@ -16,6 +16,9 @@ MEMORY_DIR = ".awd-builder/memory"
 MEMORY_FILE = f"{MEMORY_DIR}/memories.json"
 MEMORY_GITIGNORE = f"/{MEMORY_DIR}/"
 MEMORY_SKILL_NAME = "workflow-memory"
+CANONICAL_AGENTS = Path(".agents/agents")
+CANONICAL_COMMANDS = Path(".agents/commands")
+CANONICAL_SKILLS = Path(".agents/skills")
 ITEM_KINDS = ("agents", "skills", "commands")
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -43,6 +46,15 @@ TOOLS = {
         "skills_dir": ".opencode/skills",
     },
 }
+HARNESS_NAMES = (
+    "opencode",
+    "claude-code",
+    "codex",
+    "github-copilot",
+    "pi",
+    "cursor",
+)
+GENERATOR_NAMES = tuple(TOOLS)
 
 
 class WorkflowError(Exception):
@@ -79,8 +91,12 @@ def validate_plan(plan):
         raise WorkflowError("the plan must be a YAML mapping")
     if not plan.get("name"):
         raise WorkflowError("the plan needs a 'name'")
-    if plan.get("tool") not in TOOLS:
-        raise WorkflowError(f"'tool' must be one of: {', '.join(TOOLS)}")
+    harnesses = workflow_harnesses(plan)
+    if not harnesses:
+        raise WorkflowError(f"'harnesses' must contain at least one of: {', '.join(HARNESS_NAMES)}")
+    generator = workflow_generator(plan)
+    if generator not in GENERATOR_NAMES:
+        raise WorkflowError(f"'generator' must be one of: {', '.join(GENERATOR_NAMES)}")
     if plan.get("model") is not None:
         check_model(plan["model"], "'model'")
 
@@ -124,6 +140,27 @@ def components(plan):
     for kind in ITEM_KINDS:
         for item in plan.get(kind) or []:
             yield kind[:-1], item
+
+
+def workflow_harnesses(plan):
+    """Return output harnesses, with legacy `tool` plans mapped to one harness."""
+    harnesses = plan.get("harnesses")
+    if harnesses is None:
+        tool = plan.get("tool")
+        return [tool] if tool in HARNESS_NAMES else []
+    if not isinstance(harnesses, list):
+        raise WorkflowError("'harnesses' must be a list")
+    invalid = [name for name in harnesses if name not in HARNESS_NAMES]
+    if invalid:
+        raise WorkflowError(f"unsupported harness(es): {', '.join(map(str, invalid))}; choose from: {', '.join(HARNESS_NAMES)}")
+    if len(set(harnesses)) != len(harnesses):
+        raise WorkflowError("'harnesses' must not contain duplicates")
+    return harnesses
+
+
+def workflow_generator(plan):
+    """Return the CLI used to author canonical components."""
+    return plan.get("generator") or plan.get("tool") or "claude-code"
 
 
 def find_executable(name):

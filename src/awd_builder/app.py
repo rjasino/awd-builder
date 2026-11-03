@@ -11,6 +11,7 @@ from pathlib import Path
 from .lib import (
     APP_PLAN_FILE,
     APP_PLAN_TEMPLATE,
+    HARNESS_NAMES,
     WorkflowError,
     check_folders,
     find_executable,
@@ -19,6 +20,7 @@ from .lib import (
     write_template,
 )
 from .scaffold import print_step
+from .sync import SPEC_KIT_INTEGRATIONS, sync_workflow
 
 SPECKIT_PACKAGE = "specify-cli"
 SPECKIT_EXTENSIONS = ("assess", "bug")
@@ -42,9 +44,16 @@ def validate_app_plan(plan):
         raise WorkflowError("the app plan must be a YAML mapping")
     if not plan.get("name"):
         raise WorkflowError("the plan needs a 'name'")
-    integration = plan.get("integration")
-    if not isinstance(integration, str) or not integration.strip():
-        raise WorkflowError("'integration' must be the Spec Kit key of your coding agent, for example claude or opencode")
+    if plan.get("harnesses") is None:
+        integration = plan.get("integration")
+        if not isinstance(integration, str) or not integration.strip():
+            raise WorkflowError("'harnesses' must contain at least one supported agent harness")
+    else:
+        harnesses = app_harnesses(plan)
+        if not harnesses:
+            raise WorkflowError("'harnesses' must contain at least one supported agent harness")
+        if len(set(harnesses)) != len(harnesses):
+            raise WorkflowError("'harnesses' must not contain duplicates")
     check_folders(plan.get("folders") or [])
     extensions = plan.get("extensions") or []
     if not isinstance(extensions, list):
@@ -54,6 +63,32 @@ def validate_app_plan(plan):
             raise WorkflowError(
                 f"extension '{extension}' is not supported; choose from: {', '.join(SPECKIT_EXTENSIONS)}"
             )
+
+
+def app_harnesses(plan):
+    """Return canonical harness ids for a new multi-harness app plan."""
+    harnesses = plan.get("harnesses")
+    if harnesses is not None:
+        if not isinstance(harnesses, list):
+            raise WorkflowError("'harnesses' must be a list")
+        invalid = [name for name in harnesses if name not in HARNESS_NAMES]
+        if invalid:
+            raise WorkflowError(
+                f"unsupported harness(es): {', '.join(map(str, invalid))}; choose from: {', '.join(HARNESS_NAMES)}"
+            )
+        return harnesses
+
+    reverse = {value: key for key, value in SPEC_KIT_INTEGRATIONS.items()}
+    integration = plan.get("integration")
+    return [reverse[integration]] if integration in reverse else []
+
+
+def app_integration_keys(plan):
+    harnesses = app_harnesses(plan)
+    if harnesses:
+        return [SPEC_KIT_INTEGRATIONS[harness] for harness in harnesses]
+    integration = plan.get("integration")
+    return [integration] if isinstance(integration, str) and integration.strip() else []
 
 
 def add_to_path(folder):
@@ -102,17 +137,20 @@ def supported_integrations():
     return [key for key in keys if key != "none"]
 
 
-def check_integration(integration, dry_run):
+def check_integration(integrations, dry_run):
     print_step("Integration")
+    if isinstance(integrations, str):
+        integrations = [integrations]
     if dry_run and not shutil.which("specify"):
-        print(f"  would verify '{integration}' with: specify integration list")
+        print(f"  would verify {', '.join(integrations)} with: specify integration list")
         return
     keys = supported_integrations()
-    if integration not in keys:
+    missing = [integration for integration in integrations if integration not in keys]
+    if missing:
         raise WorkflowError(
-            f"'{integration}' is not a supported integration. Supported keys: {', '.join(keys)}"
+            f"unsupported Spec Kit integration(s): {', '.join(missing)}. Supported keys: {', '.join(keys)}"
         )
-    print(f"  ok {integration}")
+    print(f"  ok {', '.join(integrations)}")
 
 
 def create_folders(plan, target, dry_run):
@@ -134,8 +172,10 @@ def run_speckit(specify, args, target, dry_run):
     print(f"  ok {line}")
 
 
-def setup_speckit(integration, extensions, target, dry_run):
+def setup_speckit(integrations, extensions, target, dry_run):
     print_step("Spec Kit project")
+    if isinstance(integrations, str):
+        integrations = [integrations]
     specify = shutil.which("specify") if dry_run else find_executable("specify")
     initialized = (target / ".specify").is_dir()
     installed_integrations = []
@@ -163,13 +203,20 @@ def setup_speckit(integration, extensions, target, dry_run):
         installed_extensions = [item["id"] for item in extension_rows]
     specify = specify or "specify"
 
+    initialized_by_run = False
     if not initialized:
-        args = ["init", "--here", "--integration", integration, "--force", "--non-interactive"]
+        args = ["init", "--here", "--integration", integrations[0], "--force", "--non-interactive"]
         run_speckit(specify, args, target, dry_run)
-    elif integration in installed_integrations:
-        print(f"  ok {integration} already installed")
-    else:
-        run_speckit(specify, ["integration", "install", integration], target, dry_run)
+        initialized_by_run = True
+
+    for index, integration in enumerate(integrations):
+        if initialized_by_run and index == 0:
+            action = "would initialize" if dry_run else "initialized"
+            print(f"  {action} {integration}")
+        elif integration in installed_integrations:
+            print(f"  ok {integration} already installed")
+        else:
+            run_speckit(specify, ["integration", "install", integration], target, dry_run)
 
     print_step("Extensions")
     if not extensions:
@@ -183,10 +230,18 @@ def setup_speckit(integration, extensions, target, dry_run):
 
 def scaffold(plan, target, dry_run):
     ensure_tools(dry_run)
-    check_integration(plan["integration"], dry_run)
+    integrations = app_integration_keys(plan)
+    check_integration(integrations, dry_run)
     create_folders(plan, target, dry_run)
     extensions = list(dict.fromkeys(plan.get("extensions") or []))
-    setup_speckit(plan["integration"], extensions, target, dry_run)
+    setup_speckit(integrations, extensions, target, dry_run)
+    harnesses = app_harnesses(plan)
+    if harnesses:
+        print_step("Sync harnesses")
+        if dry_run:
+            print(f"  would sync canonical .agents files for: {', '.join(harnesses)}")
+        else:
+            sync_workflow(target, harnesses)
 
 
 def run_init(args):
@@ -205,7 +260,8 @@ def run(args):
     target = Path(args.path).resolve()
     try:
         plan = load_app_plan(target / args.plan)
-        print(f"Scaffolding application '{plan['name']}' with Spec Kit ({plan['integration']}) in {target}")
+        integrations = app_integration_keys(plan)
+        print(f"Scaffolding application '{plan['name']}' with Spec Kit ({', '.join(integrations)}) in {target}")
         if args.dry_run:
             print("(dry run: nothing will be changed)")
         scaffold(plan, target, args.dry_run)
@@ -213,7 +269,9 @@ def run(args):
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    print(f"\nDone. Open {target} in {plan['integration']} and start with the Spec Kit constitution step.")
+    destinations = app_harnesses(plan) or app_integration_keys(plan)
+    destination_note = f" in {', '.join(destinations)}" if destinations else ""
+    print(f"\nDone. Open {target}{destination_note} and start with the Spec Kit constitution step.")
     return 0
 
 

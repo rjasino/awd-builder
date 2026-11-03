@@ -2,16 +2,15 @@
 
 import argparse
 
-from . import __version__, app, evals, scaffold
+from . import __version__, app, evals, scaffold, sync
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="awd-builder",
         description=(
-            "Scaffold agentic workflows (agents, skills, commands, folders) for Claude Code "
-            "or OpenCode from a YAML plan, including private workflow memory; run routing evals "
-            "and scaffold application projects with GitHub Spec Kit."
+            "Scaffold canonical agent workflows and sync them to OpenCode, Claude Code, Codex, "
+            "GitHub Copilot, Pi, or Cursor; run routing evals and scaffold Spec Kit applications."
         ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -20,6 +19,7 @@ def build_parser():
     scaffold.register(subparsers)
     app.register(subparsers)
     evals.register(subparsers)
+    sync.register(subparsers)
     return parser
 
 

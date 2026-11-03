@@ -21,21 +21,20 @@ from .lib import (
     load_plan,
     run_agent,
     run_checked,
+    workflow_generator,
+    workflow_harnesses,
     write_template,
 )
+from .sync import CANONICAL_AGENTS, CANONICAL_COMMANDS, CANONICAL_SKILLS, sync_workflow
 
 EXTERNAL_SKILLS = (
     ("anthropics/skills", "skill-creator"),
     ("softaworks/agent-toolkit", "command-creator"),
 )
 AGENT_FORMAT_HINTS = {
-    "claude-code": (
-        "Use Claude Code's subagent format: YAML frontmatter with `name` and `description`, "
-        "followed by the system prompt as the Markdown body."
-    ),
-    "opencode": (
-        "Use OpenCode's agent format: YAML frontmatter with `description` and `mode: subagent`, "
-        "followed by the system prompt as the Markdown body."
+    "canonical": (
+        "Use the awd-builder canonical Markdown format: YAML frontmatter with `name` and `description`, "
+        "followed by the system prompt as the Markdown body. The sync step creates each selected harness's native format."
     ),
 }
 AGENT_TIMEOUT = 900
@@ -46,18 +45,17 @@ This workflow has private, consent-based memory. Before relevant work, consult t
 
 def item_path(kind, name, tool):
     if kind == "agent":
-        return f"{tool['agents_dir']}/{name}.md"
+        return f"{CANONICAL_AGENTS.as_posix()}/{name}.md"
     if kind == "skill":
-        return f"{tool['skills_dir']}/{name}/SKILL.md"
-    return f"{tool['commands_dir']}/{name}.md"
+        return f"{CANONICAL_SKILLS.as_posix()}/{name}/SKILL.md"
+    return f"{CANONICAL_COMMANDS.as_posix()}/{name}.md"
 
 
-def build_prompt(kind, item, tool_name, agent_model=None):
-    tool = TOOLS[tool_name]
+def build_prompt(kind, item, tool_name=None, agent_model=None):
     name = str(item["name"])
     description = str(item["description"]).strip()
     instructions = str(item.get("instructions") or "").strip() or "(none given; derive the details from the description)"
-    rel_path = item_path(kind, name, tool)
+    rel_path = item_path(kind, name, None)
     rules = (
         f"Write exactly one file: {rel_path}\n"
         "Create parent folders as needed. Do not create or change any other file.\n"
@@ -69,9 +67,9 @@ def build_prompt(kind, item, tool_name, agent_model=None):
         model_hint = f' Set its `model` frontmatter field to exactly "{agent_model}".' if agent_model else ""
         body = (
             f'Using the skill-creator skill\'s guidance on writing clear, well-scoped instructions, '
-            f'create one {tool["label"]} subagent named "{name}".\n\n'
-            f"{AGENT_FORMAT_HINTS[tool_name]}{model_hint}\n\n"
-            "Make the `workflow-memory` skill available to this agent: for Claude Code, include it in the agent's `skills` frontmatter; for OpenCode, direct the agent to load/use the skill through OpenCode's skill mechanism. "
+            f'create one reusable agent named "{name}".\n\n'
+            f"{AGENT_FORMAT_HINTS['canonical']}{model_hint}\n\n"
+            "Tell the agent to consult the `workflow-memory` skill at `.agents/skills/workflow-memory/SKILL.md` when relevant. "
             f"Include this mandatory memory policy in the agent's system prompt:\n{MEMORY_AGENT_POLICY}\n"
         )
     elif kind == "skill":
@@ -81,9 +79,9 @@ def build_prompt(kind, item, tool_name, agent_model=None):
         )
     else:
         body = (
-            f'Use the command-creator skill to create one {tool["label"]} slash command named "/{name}". '
+            f'Use the command-creator skill to create one canonical workflow command named "/{name}". '
             "Skip its interactive questions and pattern selection, and go straight to writing the file. "
-            "Use $ARGUMENTS for any arguments the user passes.\n\n"
+            "Put `name` and `description` in YAML frontmatter and use $ARGUMENTS for any arguments the user passes.\n\n"
         )
 
     return (
@@ -119,38 +117,29 @@ def ensure_gitignore(target):
 
 def install_memory_files(target, tool, dry_run):
     print_step("Workflow memory")
-    skill_dst = target / tool["skills_dir"] / MEMORY_SKILL_NAME
-    command_dst = target / tool["commands_dir"] / "memory.md"
+    canonical_skill_dst = target / CANONICAL_SKILLS / MEMORY_SKILL_NAME
+    canonical_command_dst = target / CANONICAL_COMMANDS / "memory.md"
     memory_file = target / MEMORY_FILE
     gitignore = target / ".gitignore"
 
     if dry_run:
-        print(f"  would copy {MEMORY_SKILL_DIR} -> {skill_dst}")
-        print(f"  would install /memory command -> {command_dst}")
+        print(f"  would install canonical memory skill -> {canonical_skill_dst}")
+        print(f"  would install canonical /memory command -> {canonical_command_dst}")
         print(f"  would initialize {memory_file} if it does not exist")
         print(f"  would add {MEMORY_GITIGNORE} to {gitignore} if needed")
         return
 
-    skill_dst.mkdir(parents=True, exist_ok=True)
-    skill_installed = False
-    for source in MEMORY_SKILL_DIR.rglob("*"):
-        if source.is_file():
-            destination = skill_dst / source.relative_to(MEMORY_SKILL_DIR)
-            if not destination.exists():
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, destination)
-                skill_installed = True
-    if skill_installed:
-        print(f"  installed missing files in {skill_dst.relative_to(target)}")
+    if copy_missing_files(MEMORY_SKILL_DIR, canonical_skill_dst):
+        print(f"  installed canonical skill in {canonical_skill_dst.relative_to(target)}")
     else:
-        print(f"  kept existing {skill_dst.relative_to(target)}")
+        print(f"  kept existing {canonical_skill_dst.relative_to(target)}")
 
-    if not command_dst.exists():
-        command_dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(MEMORY_COMMAND_FILE, command_dst)
-        print(f"  ok {command_dst.relative_to(target)}")
+    canonical_command_dst.parent.mkdir(parents=True, exist_ok=True)
+    if not canonical_command_dst.exists():
+        shutil.copyfile(MEMORY_COMMAND_FILE, canonical_command_dst)
+        print(f"  installed {canonical_command_dst.relative_to(target)}")
     else:
-        print(f"  kept existing {command_dst.relative_to(target)}")
+        print(f"  kept existing {canonical_command_dst.relative_to(target)}")
 
     memory_file.parent.mkdir(parents=True, exist_ok=True)
     if not memory_file.exists():
@@ -179,8 +168,9 @@ def copy_missing_files(source_dir, destination_dir):
 
 
 def scaffold(plan, target, dry_run):
-    tool_name = plan["tool"]
-    tool = TOOLS[tool_name]
+    generator = workflow_generator(plan)
+    tool = TOOLS[generator]
+    harnesses = workflow_harnesses(plan)
 
     reserved = {
         ("skill", MEMORY_SKILL_NAME): "the built-in workflow memory skill",
@@ -192,7 +182,16 @@ def scaffold(plan, target, dry_run):
 
     print_step("Folders")
 
-    folders = [*(plan.get("folders") or []), tool["agents_dir"], tool["commands_dir"], tool["skills_dir"], MEMORY_DIR]
+    folders = [
+        *(plan.get("folders") or []),
+        CANONICAL_AGENTS.as_posix(),
+        CANONICAL_COMMANDS.as_posix(),
+        CANONICAL_SKILLS.as_posix(),
+        tool["agents_dir"],
+        tool["commands_dir"],
+        tool["skills_dir"],
+        MEMORY_DIR,
+    ]
     for folder in dict.fromkeys(folders):
         if dry_run:
             print(f"  would create {folder}")
@@ -217,7 +216,7 @@ def scaffold(plan, target, dry_run):
             print(f"  ok {skill}")
 
     print_step("Local skill: eval-creator")
-    eval_dst = target / tool["skills_dir"] / "eval-creator"
+    eval_dst = target / CANONICAL_SKILLS / "eval-creator"
     if dry_run:
         print(f"  would copy missing files from {EVAL_CREATOR_DIR} to {eval_dst} (existing files kept)")
     else:
@@ -234,7 +233,7 @@ def scaffold(plan, target, dry_run):
     for kind, item in components(plan):
         name = str(item["name"])
         agent_model = (item.get("model") or default_model) if kind == "agent" else None
-        prompt, rel_path = build_prompt(kind, item, tool_name, agent_model)
+        prompt, rel_path = build_prompt(kind, item, generator, agent_model)
         component_path = target / rel_path
         if component_path.exists():
             action = "would keep" if dry_run else "kept"
@@ -249,7 +248,7 @@ def scaffold(plan, target, dry_run):
 
         print(f"  [{kind}] {name} -> {rel_path} ...", flush=True)
         code, stdout, stderr = run_agent(
-            tool_name, prompt, target, write=True, timeout=AGENT_TIMEOUT, model=default_model
+            generator, prompt, target, write=True, timeout=AGENT_TIMEOUT, model=default_model
         )
         if code == 0 and (target / rel_path).is_file():
             print("    ok")
@@ -261,6 +260,12 @@ def scaffold(plan, target, dry_run):
 
     if failures:
         raise WorkflowError(f"these components failed: {', '.join(failures)}")
+    if dry_run:
+        print(f"\n== Sync targets: {', '.join(harnesses)}")
+        print("  would sync canonical files from .agents to each harness")
+    else:
+        print_step("Sync harnesses")
+        sync_workflow(target, harnesses)
 
 
 def run_init(args):
@@ -279,8 +284,10 @@ def run(args):
     target = Path(args.path).resolve()
     try:
         plan = load_plan(target / args.plan)
+        generator = workflow_generator(plan)
+        harnesses = workflow_harnesses(plan)
         model_note = f" (default model: {plan['model']})" if plan.get("model") else ""
-        print(f"Scaffolding '{plan['name']}' for {plan['tool']}{model_note} in {target}")
+        print(f"Scaffolding '{plan['name']}' with {generator}{model_note}; targets: {', '.join(harnesses)} in {target}")
         if args.dry_run:
             print("(dry run: nothing will be changed)")
         scaffold(plan, target, args.dry_run)
@@ -292,7 +299,7 @@ def run(args):
         print("\nDry run complete. No files were changed.")
         return 0
 
-    print("\nDone. The private memory skill and /memory command are ready in the scaffolded workflow.")
+    print("\nDone. Canonical workflow files are under .agents and synced to the selected harnesses.")
     print("Ask your agent to use the eval-creator skill to create the routing evals,")
     print(f'then run: awd-builder evals "{target}"')
     return 0
