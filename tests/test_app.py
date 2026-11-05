@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from awd_builder.app import app_integration_keys, setup_speckit, validate_app_plan  # noqa: E402
+from awd_builder.app import app_integration_keys, ensure_tools, setup_speckit, validate_app_plan  # noqa: E402
 from awd_builder.lib import WorkflowError  # noqa: E402
 
 
@@ -32,6 +32,30 @@ class AppScaffoldIdempotencyTests(unittest.TestCase):
             return SimpleNamespace(stdout=json.dumps([{"id": "assess"}]))
         return SimpleNamespace(stdout="")
 
+    def test_tools_always_upgrade_spec_kit_even_when_already_on_path(self):
+        calls = []
+
+        def run(args, _cwd):
+            calls.append(args)
+            return SimpleNamespace(stdout="uv-bin" if args[1:3] == ["tool", "dir"] else "")
+
+        with patch("awd_builder.app.shutil.which", return_value="uv.exe"), \
+                patch("awd_builder.app.find_executable", side_effect=lambda name: f"{name}.exe"), \
+                patch("awd_builder.app.run_checked", side_effect=run), \
+                patch("awd_builder.app.add_to_path"), redirect_stdout(StringIO()):
+            ensure_tools(dry_run=False)
+
+        self.assertEqual(calls[0], ["uv.exe", "tool", "install", "--upgrade", "specify-cli"])
+        self.assertEqual(calls[1], ["uv.exe", "tool", "dir", "--bin"])
+
+    def test_tools_dry_run_reports_latest_spec_kit_upgrade(self):
+        with patch("awd_builder.app.shutil.which", return_value="uv.exe"), \
+                patch("awd_builder.app.run_checked") as run, redirect_stdout(StringIO()) as output:
+            ensure_tools(dry_run=True)
+
+        self.assertIn("uv tool install --upgrade specify-cli (latest)", output.getvalue())
+        run.assert_not_called()
+
     def test_rerun_does_not_reinstall_existing_integration_or_extension(self):
         with patch("awd_builder.app.shutil.which", return_value="specify"), \
                 patch("awd_builder.app.run_checked", side_effect=self.installed_state), \
@@ -42,8 +66,10 @@ class AppScaffoldIdempotencyTests(unittest.TestCase):
         self.assertEqual(self.commands, [
             ["integration", "status", "--json"],
             ["extension", "list", "--json"],
+            ["integration", "use", "claude"],
             ["integration", "status", "--json"],
             ["extension", "list", "--json"],
+            ["integration", "use", "claude"],
         ])
 
     def test_rerun_installs_only_missing_extensions(self):
@@ -95,6 +121,19 @@ class AppScaffoldIdempotencyTests(unittest.TestCase):
         self.assertIn(["init", "--here", "--integration", "claude", "--force", "--non-interactive"], self.commands)
         self.assertIn(["integration", "install", "codex"], self.commands)
         self.assertIn(["extension", "add", "assess"], self.commands)
+
+    def test_extensions_are_registered_for_every_selected_integration(self):
+        with patch("awd_builder.app.shutil.which", return_value="specify"), \
+                patch("awd_builder.app.run_checked", side_effect=self.installed_state), \
+                redirect_stdout(StringIO()):
+            setup_speckit(["opencode", "claude", "codex"], ["assess", "bug"], self.target, dry_run=False)
+
+        self.assertIn(["extension", "add", "bug"], self.commands)
+        self.assertLess(self.commands.index(["integration", "use", "opencode"]),
+                        self.commands.index(["extension", "add", "bug"]))
+        self.assertIn(["integration", "use", "claude"], self.commands)
+        self.assertIn(["integration", "use", "codex"], self.commands)
+        self.assertEqual(self.commands[-1], ["integration", "use", "opencode"])
 
 
 if __name__ == "__main__":

@@ -107,26 +107,26 @@ def ensure_tools(dry_run):
     print_step("Tools")
     if shutil.which("uv"):
         print("  ok uv")
+        uv = find_executable("uv")
     elif dry_run:
         print("  would install uv with the official installer")
+        uv = "uv"
     else:
         print("  installing uv with the official installer ...", flush=True)
         run_checked(UV_INSTALL_COMMAND, Path.cwd())
         add_to_path(UV_BIN_DIR)
-        find_executable("uv")
+        uv = find_executable("uv")
         print("  ok uv installed")
 
-    if shutil.which("specify"):
-        print("  ok specify (Spec Kit) installed")
-    elif dry_run:
-        print(f"  would run: uv tool install {SPECKIT_PACKAGE}")
-    else:
-        uv = find_executable("uv")
-        print(f"  installing Spec Kit with uv ({SPECKIT_PACKAGE}, latest) ...", flush=True)
-        run_checked([uv, "tool", "install", SPECKIT_PACKAGE], Path.cwd())
-        add_to_path(run_checked([uv, "tool", "dir", "--bin"], Path.cwd()).stdout.strip())
-        find_executable("specify")
-        print("  ok specify (Spec Kit) installed")
+    if dry_run:
+        print(f"  would run: uv tool install --upgrade {SPECKIT_PACKAGE} (latest)")
+        return
+
+    print(f"  installing/upgrading Spec Kit with uv ({SPECKIT_PACKAGE}, latest) ...", flush=True)
+    run_checked([uv, "tool", "install", "--upgrade", SPECKIT_PACKAGE], Path.cwd())
+    add_to_path(run_checked([uv, "tool", "dir", "--bin"], Path.cwd()).stdout.strip())
+    find_executable("specify")
+    print("  ok specify (Spec Kit, latest)")
 
 
 def supported_integrations():
@@ -218,6 +218,12 @@ def setup_speckit(integrations, extensions, target, dry_run):
         else:
             run_speckit(specify, ["integration", "install", integration], target, dry_run)
 
+    if extensions and integrations:
+        # Spec Kit registers extensions only for the active integration. Make
+        # the plan's first integration active before adding extensions, then
+        # activate each remaining integration so it gets its own commands.
+        run_speckit(specify, ["integration", "use", integrations[0]], target, dry_run)
+
     print_step("Extensions")
     if not extensions:
         print("  none in the plan")
@@ -226,6 +232,11 @@ def setup_speckit(integrations, extensions, target, dry_run):
             print(f"  ok {extension} already installed")
         else:
             run_speckit(specify, ["extension", "add", extension], target, dry_run)
+
+    if extensions and len(integrations) > 1:
+        print_step("Register extensions for integrations")
+        for integration in [*integrations[1:], integrations[0]]:
+            run_speckit(specify, ["integration", "use", integration], target, dry_run)
 
 
 def scaffold(plan, target, dry_run):

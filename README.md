@@ -92,7 +92,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
    awd-builder app run <project>
    ```
 
-   The scaffold installs `uv` if it is missing, then installs the latest `specify-cli` if `specify` is missing. It verifies every requested integration against `specify integration list`, initializes the project with the first integration, and installs the remaining missing integrations and extensions. Re-running with the same plan skips what is already installed. Removing an integration from the plan does not uninstall it. Use `awd-builder sync <project> --plan app-workflow-plan.yaml` to re-sync canonical skills and workflow components for the app's selected harnesses.
+   The scaffold installs `uv` if it is missing. On every non-dry-run invocation, it runs `uv tool install --upgrade specify-cli` to install or upgrade Spec Kit to the latest version—even when `specify` is already on `PATH`; `--dry-run` only previews this action. It verifies every requested integration against `specify integration list`, initializes the project with the first integration, and installs the remaining missing integrations and extensions. Because Spec Kit registers extensions only for the active integration, `app run` activates each selected integration to register the extensions for it, then leaves the first integration active. Re-running with the same plan skips extensions that are already installed and refreshes their registrations for the selected integrations. Removing an integration from the plan does not uninstall it. Use `awd-builder sync <project> --plan app-workflow-plan.yaml` to re-sync canonical skills and workflow components for the app's selected harnesses.
 
 ## Commands
 
