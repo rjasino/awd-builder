@@ -38,10 +38,10 @@ python scripts/install.py
 
 ## Quick start
 
-1. Create a plan in your project. Use `.` for the current folder, or the path of the project:
+1. Create a plan in your project. The current folder is the default; optionally pass a project path:
 
    ```
-   awd-builder scaffold init .
+   awd-builder scaffold init
    ```
 
    Edit `<project>/workflow-plan.yaml`. Set `generator` to `claude-code` or `opencode` (the CLI that authors canonical files), choose one or more output `harnesses`, and list the folders, agents, skills, and commands you want. Supported output harnesses are `opencode`, `claude-code`, `codex`, `github-copilot`, `pi`, and `cursor`. Existing plans using the old `tool` field remain valid and map that tool as both generator and single output harness.
@@ -63,15 +63,21 @@ python scripts/install.py
 
    Re-running `scaffold run` is safe: it creates missing canonical components and syncs target copies. Existing generated files are not regenerated. Edit the canonical file or remove it to change/regenerate a component.
 
-3. Create routing evals. In the project, ask your agent to use the `eval-creator` skill. It writes `evals/routing.yaml`.
+3. Generate routing eval cases with the project's configured generator:
+
+   ```
+   awd-builder evals init
+   ```
+
+   This uses the `eval-creator` skill to write `evals/routing.yaml`. Use `--dry-run` to preview the prompt or `--force` to replace an existing eval file. Review and edit the generated cases as needed.
 
 4. Run the routing evals:
 
    ```
-   awd-builder evals <project>
+   awd-builder evals run
    ```
 
-   Each run saves a JSON report to `<project>/evals/results.json`, including per-case expected and actual routes, pass status, and agent output. This file is overwritten on each run. Use `--output <path>` to choose another project-relative path. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error.
+   Each run saves a JSON report to `evals/results.json`, including per-case expected and actual routes, pass status, and agent output. This file is overwritten on each run. Use `--output <path>` to choose another project-relative path. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error. The previous `awd-builder evals <project>` form remains supported as an alias for `evals run <project>`.
 
 ## Application projects (Spec Kit)
 
@@ -80,7 +86,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
 1. Write an app plan template into the project:
 
    ```
-   awd-builder app init .
+   awd-builder app init
    ```
 
    Edit `<project>/app-workflow-plan.yaml`. Set `harnesses` to one or more of `opencode`, `claude-code`, `codex`, `github-copilot`, `pi`, and `cursor`. `app run` maps these names to Spec Kit integration keys and initializes/installs all selected integrations. Set `folders` and the `extensions` to install (`assess` for idea assessment, `bug` for bug fixing). The older single `integration` field remains supported.
@@ -98,14 +104,15 @@ For building an application rather than an agent workflow, `awd-builder app` set
 
 | Command                        | Purpose                                                           |
 | ------------------------------ | ----------------------------------------------------------------- |
-| `awd-builder scaffold init <p>` | Write a `workflow-plan.yaml` template into a project              |
-| `awd-builder scaffold run <p>`  | Generate canonical workflow files and sync the selected harnesses       |
-| `awd-builder evals <p>`        | Run routing evals and save a JSON report to `evals/results.json`   |
-| `awd-builder sync <p>`          | Sync canonical `.agents` components to selected harnesses          |
-| `awd-builder app init <p>`     | Write an `app-workflow-plan.yaml` template into a project         |
-| `awd-builder app run <p>`      | Scaffold a Spec Kit app for all selected harness integrations     |
+| `awd-builder scaffold init [p]` | Write a `workflow-plan.yaml` template into a project               |
+| `awd-builder scaffold run [p]`  | Generate canonical workflow files and sync the selected harnesses  |
+| `awd-builder evals init [p]`    | Generate routing eval cases in `evals/routing.yaml`                 |
+| `awd-builder evals run [p]`     | Run routing evals and save a JSON report to `evals/results.json`     |
+| `awd-builder sync <p>`          | Sync canonical `.agents` components to selected harnesses           |
+| `awd-builder app init [p]`      | Write an `app-workflow-plan.yaml` template into a project            |
+| `awd-builder app run [p]`       | Scaffold a Spec Kit app for all selected harness integrations        |
 
-`<p>` is the project folder. Use `.` for the current folder.
+`[p]` is an optional project folder and defaults to the current folder. `sync` still requires its project folder.
 
 Run any command with `--help` for all options.
 

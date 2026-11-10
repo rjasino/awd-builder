@@ -1,4 +1,4 @@
-"""`awd-builder evals`: run the workflow-wide routing evals in evals/routing.yaml."""
+"""`awd-builder evals`: generate and run workflow-wide routing evals."""
 
 import json
 import re
@@ -39,6 +39,14 @@ ROUTE: agent/<name>
 ROUTE: skill/<name>
 ROUTE: command/<name>
 ROUTE: none
+"""
+EVAL_CREATION_PROMPT = """\
+Use the eval-creator skill in this project to create a comprehensive workflow-wide routing eval suite.
+
+Read the workflow plan at `{plan}` and write exactly one file: `{evals}`.
+Create parent folders as needed. Do not create, edit, or run anything else.
+Follow the skill's case-generation guidance and YAML schema. Every expected route must refer to a component
+in the plan (or be `none`). Make the prompts realistic and self-contained.
 """
 
 
@@ -105,6 +113,50 @@ def save_results(path, plan, evals_path, results):
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     except OSError as error:
         raise WorkflowError(f"could not save eval results to {path}: {error}") from error
+
+
+def init(args):
+    target = Path(args.path).resolve()
+    plan_path = (target / args.plan).resolve()
+    evals_path = (target / EVAL_FILE).resolve()
+    prompt = EVAL_CREATION_PROMPT.format(plan=args.plan, evals=EVAL_FILE)
+    try:
+        plan = load_plan(plan_path)
+        if evals_path.exists() and not args.force:
+            raise WorkflowError(f"{evals_path} already exists (use --force to overwrite)")
+    except WorkflowError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+    generator = workflow_generator(plan)
+    if args.dry_run:
+        print(f"Would generate routing evals for '{plan['name']}' with {generator} in {target}")
+        print("(dry run: no agent call or files changed)")
+        print("\n== Prompt ==")
+        print(prompt)
+        return 0
+
+    try:
+        code, stdout, stderr = run_agent(
+            generator,
+            prompt,
+            target,
+            write=True,
+            timeout=args.timeout,
+            model=plan.get("model"),
+        )
+        if code != 0 or not evals_path.is_file():
+            detail = "\n".join(part for part in (stderr.strip(), stdout.strip()) if part)[-500:]
+            reason = detail or f"agent exited with code {code} and did not write {EVAL_FILE}"
+            raise WorkflowError(f"could not generate routing evals: {reason}")
+        cases = load_cases(evals_path, plan)
+    except WorkflowError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+    print(f"Generated {len(cases)} routing case(s) in {evals_path}")
+    print(f'Edit the cases if needed, then run: awd-builder evals run "{target}"')
+    return 0
 
 
 def run(args):
@@ -186,12 +238,23 @@ def run(args):
 
 
 def register(subparsers):
-    parser = subparsers.add_parser("evals", help="run the routing evals against the scaffolded workflow")
-    parser.add_argument("path", help='project folder to test, for example "." for the current folder')
-    parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to the project folder (default: {PLAN_FILE})")
-    parser.add_argument("--evals", default=EVAL_FILE, help=f"eval file, relative to the project folder (default: {EVAL_FILE})")
-    parser.add_argument("--only", action="append", default=[], metavar="ID", help="run only this case id (repeatable)")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds per case (default: %(default)s)")
-    parser.add_argument("--output", default=DEFAULT_RESULTS_FILE, help=f"results JSON path, relative to the project (default: {DEFAULT_RESULTS_FILE})")
-    parser.add_argument("--dry-run", action="store_true", help="print the routing prompts without calling the agent")
-    parser.set_defaults(func=run)
+    parser = subparsers.add_parser("evals", help="generate and run workflow routing evals")
+    actions = parser.add_subparsers(dest="action", required=True, metavar="action")
+
+    init_parser = actions.add_parser("init", help="generate routing eval cases for the workflow")
+    init_parser.add_argument("path", nargs="?", default=".", help="project folder (default: current folder)")
+    init_parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to the project folder (default: {PLAN_FILE})")
+    init_parser.add_argument("--force", action="store_true", help="overwrite an existing eval file")
+    init_parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds allowed for generation (default: %(default)s)")
+    init_parser.add_argument("--dry-run", action="store_true", help="print the generation prompt without calling the agent")
+    init_parser.set_defaults(func=init)
+
+    run_parser = actions.add_parser("run", help="run the routing evals against the workflow")
+    run_parser.add_argument("path", nargs="?", default=".", help="project folder (default: current folder)")
+    run_parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to the project folder (default: {PLAN_FILE})")
+    run_parser.add_argument("--evals", default=EVAL_FILE, help=f"eval file, relative to the project folder (default: {EVAL_FILE})")
+    run_parser.add_argument("--only", action="append", default=[], metavar="ID", help="run only this case id (repeatable)")
+    run_parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds per case (default: %(default)s)")
+    run_parser.add_argument("--output", default=DEFAULT_RESULTS_FILE, help=f"results JSON path, relative to the project (default: {DEFAULT_RESULTS_FILE})")
+    run_parser.add_argument("--dry-run", action="store_true", help="print the routing prompts without calling the agent")
+    run_parser.set_defaults(func=run)

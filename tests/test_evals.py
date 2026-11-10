@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from awd_builder.evals import DEFAULT_RESULTS_FILE, run  # noqa: E402
+from awd_builder.evals import DEFAULT_RESULTS_FILE, init, run  # noqa: E402
 
 
 class EvalResultTests(unittest.TestCase):
@@ -90,6 +90,70 @@ class EvalResultTests(unittest.TestCase):
 
             self.assertEqual(result, 2)
             self.assertEqual(evals_path.read_text(encoding="utf-8"), original)
+
+    def test_init_generates_and_validates_routing_cases(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            (target / "workflow-plan.yaml").write_text(
+                "name: sample\ntool: opencode\nagents:\n  - name: planner\n    description: Plans work\n",
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                path=str(target), plan="workflow-plan.yaml", force=False,
+                timeout=30, dry_run=False,
+            )
+
+            def generate(_tool, _prompt, cwd, **_kwargs):
+                evals_path = Path(cwd) / "evals/routing.yaml"
+                evals_path.parent.mkdir(parents=True)
+                evals_path.write_text(
+                    "cases:\n  - id: planner-direct-1\n    prompt: Plan a feature\n    expected: agent/planner\n",
+                    encoding="utf-8",
+                )
+                return 0, "generated", ""
+
+            with patch("awd_builder.evals.run_agent", side_effect=generate) as run_agent, \
+                    redirect_stdout(StringIO()):
+                result = init(args)
+
+            self.assertEqual(result, 0)
+            run_agent.assert_called_once()
+            self.assertTrue((target / "evals/routing.yaml").is_file())
+
+    def test_init_dry_run_does_not_call_agent_or_create_eval_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            (target / "workflow-plan.yaml").write_text(
+                "name: sample\ntool: opencode\nagents: []\n", encoding="utf-8"
+            )
+            args = SimpleNamespace(
+                path=str(target), plan="workflow-plan.yaml", force=False,
+                timeout=30, dry_run=True,
+            )
+            with patch("awd_builder.evals.run_agent") as run_agent, redirect_stdout(StringIO()) as output:
+                result = init(args)
+
+            self.assertEqual(result, 0)
+            self.assertIn("eval-creator", output.getvalue())
+            run_agent.assert_not_called()
+            self.assertFalse((target / "evals/routing.yaml").exists())
+
+    def test_init_does_not_overwrite_existing_eval_file_without_force(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_project(target)
+            existing = (target / "evals/routing.yaml").read_text(encoding="utf-8")
+            args = SimpleNamespace(
+                path=str(target), plan="workflow-plan.yaml", force=False,
+                timeout=30, dry_run=False,
+            )
+            with patch("awd_builder.evals.run_agent") as run_agent, \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = init(args)
+
+            self.assertEqual(result, 2)
+            run_agent.assert_not_called()
+            self.assertEqual((target / "evals/routing.yaml").read_text(encoding="utf-8"), existing)
 
 
 if __name__ == "__main__":

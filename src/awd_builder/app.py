@@ -291,12 +291,12 @@ def register(subparsers):
     actions = parser.add_subparsers(dest="action", required=True, metavar="action")
 
     init = actions.add_parser("init", help=f"write an {APP_PLAN_FILE} template into a project")
-    init.add_argument("path", help='project folder, for example "." for the current folder')
+    init.add_argument("path", nargs="?", default=".", help='project folder (default: current folder)')
     init.add_argument("--force", action="store_true", help="overwrite an existing plan")
     init.set_defaults(func=run_init)
 
     run_parser = actions.add_parser("run", help="scaffold the application project from the plan")
-    run_parser.add_argument("path", help='project folder, for example "." for the current folder')
+    run_parser.add_argument("path", nargs="?", default=".", help='project folder (default: current folder)')
     run_parser.add_argument("--plan", default=APP_PLAN_FILE, help=f"plan file, relative to the project folder (default: {APP_PLAN_FILE})")
     run_parser.add_argument("--dry-run", action="store_true", help="print what would happen and change nothing")
     run_parser.set_defaults(func=run)
