@@ -90,7 +90,7 @@ python scripts/install.py
    awd-builder evals run
    ```
 
-   Each run saves a JSON report to `evals/results.json` and a Markdown summary to `evals/results.md`. The JSON includes per-case expected and actual routes, pass status, and agent output. The summary shows whether all cases passed, details failed cases, and lists every case in a table. Both files are overwritten on each run. Use `--output <path>` or `--summary <path>` to choose project-relative output paths. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error. The previous `awd-builder evals <project>` form remains supported as an alias for `evals run <project>`.
+   Each run saves a JSON report to `evals/results.json` and a Markdown summary to `evals/results.md`. The JSON includes per-case expected and actual routes, pass status, and agent output. The summary shows whether all cases passed, details failed cases, and lists every case in a table. When failures occur, the configured generator also analyzes the saved results and adds likely causes and concrete recommendations to the summary. Both files are overwritten on each run. Use `--output <path>` or `--summary <path>` to choose project-relative output paths. Use `--no-analysis` to skip the generator-based failure analysis. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error. The previous `awd-builder evals <project>` form remains supported as an alias for `evals run <project>`.
 
 ## Application projects (Spec Kit)
 

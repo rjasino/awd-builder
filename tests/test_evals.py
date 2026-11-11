@@ -46,6 +46,7 @@ class EvalResultTests(unittest.TestCase):
             "timeout": 30,
             "dry_run": False,
             "summary": DEFAULT_SUMMARY_FILE,
+            "no_analysis": False,
         }
         values.update(overrides)
         return SimpleNamespace(**values)
@@ -57,6 +58,16 @@ class EvalResultTests(unittest.TestCase):
             responses = iter((
                 (0, "ROUTE: agent/planner\n", ""),
                 (0, "ROUTE: skill/planner\n", "agent warning"),
+                (
+                    0,
+                    "### `unrelated`\n"
+                    "- **Likely cause:** The prompt overlaps with a skill description.\n"
+                    "- **Evidence:** The actual route was skill/planner.\n"
+                    "- **Recommendation:** Make the descriptions more distinct.\n"
+                    "\n## Recommended Changes\n"
+                    "Update the skill description.\n",
+                    "",
+                ),
             ))
 
             with patch("awd_builder.evals.run_agent", side_effect=lambda *args, **kwargs: next(responses)), \
@@ -78,12 +89,52 @@ class EvalResultTests(unittest.TestCase):
             summary = (target / DEFAULT_SUMMARY_FILE).read_text(encoding="utf-8")
             self.assertIn("# Routing Eval Results", summary)
             self.assertIn("**FAILED** — 1 of 2 routing cases failed.", summary)
+            self.assertIn("## Failure Analysis", summary)
+            self.assertIn("The prompt overlaps with a skill description.", summary)
+            self.assertIn("## Recommended Changes", summary)
             self.assertIn("## Failed Cases", summary)
             self.assertIn("### `unrelated`", summary)
             self.assertIn("- Expected: `none`", summary)
             self.assertIn("- Actual: `skill/planner`", summary)
             self.assertIn("| planning | PASS | agent/planner | agent/planner |", summary)
             self.assertIn("| unrelated | FAIL | none | skill/planner |", summary)
+
+    def test_failure_analysis_can_be_disabled(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_project(target)
+            responses = iter((
+                (0, "ROUTE: agent/planner\n", ""),
+                (0, "ROUTE: skill/planner\n", ""),
+            ))
+
+            with patch("awd_builder.evals.run_agent", side_effect=lambda *args, **kwargs: next(responses)) as agent, \
+                    redirect_stdout(StringIO()):
+                result = run(self.make_args(target, no_analysis=True))
+
+            self.assertEqual(result, 1)
+            self.assertEqual(agent.call_count, 2)
+            summary = (target / DEFAULT_SUMMARY_FILE).read_text(encoding="utf-8")
+            self.assertNotIn("## Failure Analysis", summary)
+
+    def test_failure_analysis_falls_back_when_generator_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_project(target)
+            responses = iter((
+                (0, "ROUTE: agent/planner\n", ""),
+                (0, "ROUTE: skill/planner\n", ""),
+                (1, "", "analysis failed"),
+            ))
+
+            with patch("awd_builder.evals.run_agent", side_effect=lambda *args, **kwargs: next(responses)), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = run(self.make_args(target))
+
+            self.assertEqual(result, 1)
+            summary = (target / DEFAULT_SUMMARY_FILE).read_text(encoding="utf-8")
+            self.assertIn("_Failure analysis unavailable: analysis failed_", summary)
+            self.assertIn("## Failed Cases", summary)
 
     def test_summary_reports_success_when_all_cases_pass(self):
         with tempfile.TemporaryDirectory() as temp:

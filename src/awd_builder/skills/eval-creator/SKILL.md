@@ -65,4 +65,4 @@ The runner is the `awd-builder` CLI, installed on the user's machine. Run:
 awd-builder evals run [project-folder]
 ```
 
-The project folder defaults to the current directory. Each run writes `evals/results.json` and a reviewable Markdown summary at `evals/results.md`. Add `--dry-run` to print the exact routing prompts without calling the agent. Add `--only <id>` to run one case.
+The project folder defaults to the current directory. Each run writes `evals/results.json` and a reviewable Markdown summary at `evals/results.md`. When cases fail, the runner asks the configured generator to add likely causes and recommendations to the summary. Add `--no-analysis` to skip that inference step, `--dry-run` to print the exact routing prompts without calling the agent, or `--only <id>` to run one case.
