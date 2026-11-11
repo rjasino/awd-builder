@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -21,18 +22,21 @@ class OverrideInitTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with redirect_stdout(StringIO()):
-                result = main(
-                    [
-                        "overrides",
-                        "init",
-                        str(target),
-                        "--harness",
-                        "opencode",
-                        "--agent",
-                        "planner",
-                    ]
-                )
+            original = Path.cwd()
+            try:
+                os.chdir(target)
+                with redirect_stdout(StringIO()):
+                    result = main(
+                        [
+                            "overrides",
+                            "--harness",
+                            "opencode",
+                            "--agent",
+                            "planner",
+                        ]
+                    )
+            finally:
+                os.chdir(original)
 
             destination = target / ".awd-builder/overrides/opencode/agents/planner.yaml"
             self.assertEqual(result, 0)
@@ -61,18 +65,21 @@ class OverrideInitTests(unittest.TestCase):
             destination.parent.mkdir(parents=True)
             destination.write_text("mode: primary\n", encoding="utf-8")
 
-            with redirect_stderr(StringIO()):
-                result = main(
-                    [
-                        "overrides",
-                        "init",
-                        str(target),
-                        "--harness",
-                        "opencode",
-                        "--agent",
-                        "planner",
-                    ]
-                )
+            original = Path.cwd()
+            try:
+                os.chdir(target)
+                with redirect_stderr(StringIO()):
+                    result = main(
+                        [
+                            "overrides",
+                            "--harness",
+                            "opencode",
+                            "--agent",
+                            "planner",
+                        ]
+                    )
+            finally:
+                os.chdir(original)
 
             self.assertEqual(result, 2)
             self.assertEqual(destination.read_text(encoding="utf-8"), "mode: primary\n")

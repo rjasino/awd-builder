@@ -93,10 +93,7 @@ def init(args):
 
 
 def register(subparsers):
-    parser = subparsers.add_parser("overrides", help="manage harness-specific agent metadata overrides")
-    actions = parser.add_subparsers(dest="action", required=True, metavar="action")
-    init_parser = actions.add_parser("init", help="create a starter agent metadata override YAML file")
-    init_parser.add_argument("path", nargs="?", default=".", help="project folder (default: current folder)")
-    init_parser.add_argument("--harness", required=True, choices=HARNESS_NAMES, help="target harness")
-    init_parser.add_argument("--agent", required=True, help="canonical agent name (from .agents/agents)")
-    init_parser.set_defaults(func=init)
+    parser = subparsers.add_parser("overrides", help="create a starter harness-specific agent metadata override")
+    parser.add_argument("--harness", required=True, choices=HARNESS_NAMES, help="target harness")
+    parser.add_argument("--agent", required=True, help="canonical agent name (from .agents/agents)")
+    parser.set_defaults(func=init, path=".")

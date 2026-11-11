@@ -59,7 +59,7 @@ python scripts/install.py
 
    Canonical source files live in `.agents/agents`, `.agents/skills`, and `.agents/commands`. Use `awd-builder sync <project>` to re-sync after editing canonical files. Synced outputs are tracked in `.awd-builder/sync-manifest.json`; conflicts with untracked or locally modified target files stop the sync. Review before using `awd-builder sync <project> --force`, which overwrites those files. Sync does not delete stale outputs when a component or harness is removed from the plan.
 
-   Generate a starter override with `awd-builder overrides init <project> --harness opencode --agent planner`. This creates `.awd-builder/overrides/opencode/agents/planner.yaml` without overwriting an existing file. Keep harness-specific agent metadata in these override files rather than editing generated agent files. For example, an OpenCode override can contain:
+   From the project folder, generate a starter override with `awd-builder overrides --harness opencode --agent planner`. This creates `.awd-builder/overrides/opencode/agents/planner.yaml` without overwriting an existing file. Keep harness-specific agent metadata in these override files rather than editing generated agent files. For example, an OpenCode override can contain:
 
    ```yaml
    mode: primary
@@ -122,7 +122,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
 | `awd-builder evals init [p]`    | Generate routing eval cases in `evals/routing.yaml`                 |
 | `awd-builder evals run [p]`     | Run routing evals and save a JSON report to `evals/results.json`     |
 | `awd-builder sync <p>`          | Sync canonical `.agents` components to selected harnesses           |
-| `awd-builder overrides init [p] --harness H --agent A` | Create a starter harness-specific agent override YAML |
+| `awd-builder overrides --harness H --agent A` | Create a starter harness-specific agent override YAML |
 | `awd-builder app init [p]`      | Write an `app-workflow-plan.yaml` template into a project            |
 | `awd-builder app run [p]`       | Scaffold a Spec Kit app for all selected harness integrations        |
 
