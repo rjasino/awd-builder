@@ -20,6 +20,7 @@ from .lib import (
 
 DEFAULT_TIMEOUT = 300
 DEFAULT_RESULTS_FILE = "evals/results.json"
+DEFAULT_SUMMARY_FILE = "evals/results.md"
 EXPECTED_PATTERN = re.compile(r"^(?:(agent|skill|command)/([a-z0-9]+(?:-[a-z0-9]+)*)|none)$")
 ROUTE_PATTERN = re.compile(
     r"ROUTE:\s*(?:(agent|skill|command)/([a-z0-9]+(?:-[a-z0-9]+)*)|(none))",
@@ -113,6 +114,98 @@ def save_results(path, plan, evals_path, results):
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     except OSError as error:
         raise WorkflowError(f"could not save eval results to {path}: {error}") from error
+    return payload
+
+
+def _markdown_cell(value):
+    return str(value).replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _indented_block(value):
+    text = str(value).strip()
+    if not text:
+        return ""
+    return "\n".join(f"    {line}" for line in text.splitlines())
+
+
+def save_summary(path, payload):
+    summary = payload["summary"]
+    total = summary["total"]
+    failed = summary["failed"]
+    case_word = "case" if total == 1 else "cases"
+    lines = [
+        "# Routing Eval Results",
+        "",
+        f"- Workflow: `{payload['workflow']}`",
+        f"- Generator: `{payload['tool']}`",
+        f"- Harnesses: `{', '.join(payload['harnesses'])}`",
+        f"- Model: `{payload['model'] or 'generator default'}`",
+        f"- Run at: `{payload['run_at']}`",
+        f"- Cases: `{total}` total, `{summary['passed']}` passed, `{failed}` failed",
+        "",
+        "## Status",
+        "",
+    ]
+    if failed:
+        lines.append(
+            f"**FAILED** — {failed} of {total} routing {case_word} failed."
+        )
+    else:
+        lines.append(
+            f"All {total} routing {case_word} completed successfully."
+        )
+
+    failed_results = [result for result in payload["results"] if not result["passed"]]
+    if failed_results:
+        lines.extend(("", "## Failed Cases"))
+        for result in failed_results:
+            actual = result["actual"] or "no route"
+            lines.extend((
+                "",
+                f"### `{result['id']}`",
+                "",
+                f"- Expected: `{result['expected']}`",
+                f"- Actual: `{actual}`",
+                f"- Return code: `{result['returncode'] if result['returncode'] is not None else 'not run'}`",
+                "",
+                "**Prompt**",
+                "",
+            ))
+            prompt_lines = result["prompt"].splitlines() or [""]
+            lines.extend(f"> {line}" for line in prompt_lines)
+            detail = "\n".join(
+                part for part in (result["stderr"].strip(), result["stdout"].strip()) if part
+            ).strip()
+            if detail:
+                lines.extend((
+                    "",
+                    "**Agent output**",
+                    "",
+                    _indented_block(detail),
+                ))
+
+    lines.extend((
+        "",
+        "## All Cases",
+        "",
+        "| Case | Status | Expected | Actual |",
+        "| --- | --- | --- | --- |",
+    ))
+    for result in payload["results"]:
+        actual = result["actual"] or "no route"
+        lines.append(
+            f"| {_markdown_cell(result['id'])} | "
+            f"{'PASS' if result['passed'] else 'FAIL'} | "
+            f"{_markdown_cell(result['expected'])} | "
+            f"{_markdown_cell(actual)} |"
+        )
+    lines.append("")
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines), encoding="utf-8")
+    except OSError as error:
+        raise WorkflowError(f"could not save eval summary to {path}: {error}") from error
 
 
 def init(args):
@@ -162,12 +255,18 @@ def init(args):
 def run(args):
     target = Path(args.path).resolve()
     output_arg = getattr(args, "output", DEFAULT_RESULTS_FILE)
+    summary_arg = getattr(args, "summary", DEFAULT_SUMMARY_FILE)
     output_path = (target / output_arg).resolve()
+    summary_path = (target / summary_arg).resolve()
     try:
         plan_path = (target / args.plan).resolve()
         evals_path = (target / args.evals).resolve()
         if output_path in (plan_path, evals_path):
             raise WorkflowError("the results output must not overwrite the workflow plan or eval cases")
+        if summary_path in (plan_path, evals_path, output_path):
+            raise WorkflowError(
+                "the summary output must not overwrite the workflow plan, eval cases, or results JSON"
+            )
         plan = load_plan(plan_path)
         cases = load_cases(evals_path, plan)
         if args.only:
@@ -226,11 +325,13 @@ def run(args):
     total = len(cases)
     print(f"\n{total - len(failed)}/{total} passed")
     try:
-        save_results(output_path, plan, args.evals, results)
+        payload = save_results(output_path, plan, args.evals, results)
+        save_summary(summary_path, payload)
     except WorkflowError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     print(f"results saved to {output_path}")
+    print(f"summary saved to {summary_path}")
     if failed:
         print(f"failed: {', '.join(failed)}")
         return 1
@@ -256,5 +357,6 @@ def register(subparsers):
     run_parser.add_argument("--only", action="append", default=[], metavar="ID", help="run only this case id (repeatable)")
     run_parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds per case (default: %(default)s)")
     run_parser.add_argument("--output", default=DEFAULT_RESULTS_FILE, help=f"results JSON path, relative to the project (default: {DEFAULT_RESULTS_FILE})")
+    run_parser.add_argument("--summary", default=DEFAULT_SUMMARY_FILE, help=f"results summary Markdown path, relative to the project (default: {DEFAULT_SUMMARY_FILE})")
     run_parser.add_argument("--dry-run", action="store_true", help="print the routing prompts without calling the agent")
     run_parser.set_defaults(func=run)

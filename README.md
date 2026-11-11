@@ -90,7 +90,7 @@ python scripts/install.py
    awd-builder evals run
    ```
 
-   Each run saves a JSON report to `evals/results.json`, including per-case expected and actual routes, pass status, and agent output. This file is overwritten on each run. Use `--output <path>` to choose another project-relative path. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error. The previous `awd-builder evals <project>` form remains supported as an alias for `evals run <project>`.
+   Each run saves a JSON report to `evals/results.json` and a Markdown summary to `evals/results.md`. The JSON includes per-case expected and actual routes, pass status, and agent output. The summary shows whether all cases passed, details failed cases, and lists every case in a table. Both files are overwritten on each run. Use `--output <path>` or `--summary <path>` to choose project-relative output paths. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error. The previous `awd-builder evals <project>` form remains supported as an alias for `evals run <project>`.
 
 ## Application projects (Spec Kit)
 
@@ -120,7 +120,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
 | `awd-builder scaffold init [p]` | Write a `workflow-plan.yaml` template into a project               |
 | `awd-builder scaffold run [p]`  | Generate canonical workflow files and sync the selected harnesses  |
 | `awd-builder evals init [p]`    | Generate routing eval cases in `evals/routing.yaml`                 |
-| `awd-builder evals run [p]`     | Run routing evals and save a JSON report to `evals/results.json`     |
+| `awd-builder evals run [p]`     | Run routing evals and save JSON and Markdown reports                |
 | `awd-builder sync <p>`          | Sync canonical `.agents` components to selected harnesses           |
 | `awd-builder overrides --harness H --agent A` | Create a starter harness-specific agent override YAML |
 | `awd-builder app init [p]`      | Write an `app-workflow-plan.yaml` template into a project            |

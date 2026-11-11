@@ -10,7 +10,12 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from awd_builder.evals import DEFAULT_RESULTS_FILE, init, run  # noqa: E402
+from awd_builder.evals import (  # noqa: E402
+    DEFAULT_RESULTS_FILE,
+    DEFAULT_SUMMARY_FILE,
+    init,
+    run,
+)
 
 
 class EvalResultTests(unittest.TestCase):
@@ -40,6 +45,7 @@ class EvalResultTests(unittest.TestCase):
             "only": [],
             "timeout": 30,
             "dry_run": False,
+            "summary": DEFAULT_SUMMARY_FILE,
         }
         values.update(overrides)
         return SimpleNamespace(**values)
@@ -69,6 +75,53 @@ class EvalResultTests(unittest.TestCase):
             self.assertEqual(payload["results"][1]["stderr"], "agent warning")
             self.assertTrue(payload["run_at"].endswith("Z"))
 
+            summary = (target / DEFAULT_SUMMARY_FILE).read_text(encoding="utf-8")
+            self.assertIn("# Routing Eval Results", summary)
+            self.assertIn("**FAILED** — 1 of 2 routing cases failed.", summary)
+            self.assertIn("## Failed Cases", summary)
+            self.assertIn("### `unrelated`", summary)
+            self.assertIn("- Expected: `none`", summary)
+            self.assertIn("- Actual: `skill/planner`", summary)
+            self.assertIn("| planning | PASS | agent/planner | agent/planner |", summary)
+            self.assertIn("| unrelated | FAIL | none | skill/planner |", summary)
+
+    def test_summary_reports_success_when_all_cases_pass(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_project(target)
+            responses = iter((
+                (0, "ROUTE: agent/planner\n", ""),
+                (0, "ROUTE: none\n", ""),
+            ))
+
+            with patch("awd_builder.evals.run_agent", side_effect=lambda *args, **kwargs: next(responses)), \
+                    redirect_stdout(StringIO()):
+                result = run(self.make_args(target))
+
+            self.assertEqual(result, 0)
+            summary = (target / DEFAULT_SUMMARY_FILE).read_text(encoding="utf-8")
+            self.assertIn("All 2 routing cases completed successfully.", summary)
+            self.assertNotIn("## Failed Cases", summary)
+            self.assertIn("| planning | PASS | agent/planner | agent/planner |", summary)
+            self.assertIn("| unrelated | PASS | none | none |", summary)
+
+    def test_custom_summary_path_is_written(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_project(target)
+            responses = iter((
+                (0, "ROUTE: agent/planner\n", ""),
+                (0, "ROUTE: none\n", ""),
+            ))
+
+            with patch("awd_builder.evals.run_agent", side_effect=lambda *args, **kwargs: next(responses)), \
+                    redirect_stdout(StringIO()):
+                result = run(self.make_args(target, summary="evals/custom-summary.md"))
+
+            self.assertEqual(result, 0)
+            self.assertTrue((target / "evals/custom-summary.md").is_file())
+            self.assertFalse((target / DEFAULT_SUMMARY_FILE).exists())
+
     def test_dry_run_does_not_write_results(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp)
@@ -78,6 +131,7 @@ class EvalResultTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertFalse((target / DEFAULT_RESULTS_FILE).exists())
+            self.assertFalse((target / DEFAULT_SUMMARY_FILE).exists())
 
     def test_results_output_cannot_overwrite_eval_cases(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -90,6 +144,23 @@ class EvalResultTests(unittest.TestCase):
 
             self.assertEqual(result, 2)
             self.assertEqual(evals_path.read_text(encoding="utf-8"), original)
+
+    def test_summary_output_cannot_overwrite_eval_cases_or_results_json(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_project(target)
+            evals_path = target / "evals/routing.yaml"
+            original = evals_path.read_text(encoding="utf-8")
+
+            for summary, output in (
+                ("evals/routing.yaml", DEFAULT_RESULTS_FILE),
+                (DEFAULT_RESULTS_FILE, DEFAULT_RESULTS_FILE),
+            ):
+                with self.subTest(summary=summary):
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        result = run(self.make_args(target, summary=summary, output=output))
+                    self.assertEqual(result, 2)
+                    self.assertEqual(evals_path.read_text(encoding="utf-8"), original)
 
     def test_init_generates_and_validates_routing_cases(self):
         with tempfile.TemporaryDirectory() as temp:
