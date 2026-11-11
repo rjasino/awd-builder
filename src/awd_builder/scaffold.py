@@ -232,7 +232,7 @@ def scaffold(plan, target, dry_run):
     failures = []
     for kind, item in components(plan):
         name = str(item["name"])
-        agent_model = (item.get("model") or default_model) if kind == "agent" else None
+        agent_model = item.get("model") if kind == "agent" else None
         prompt, rel_path = build_prompt(kind, item, generator, agent_model)
         component_path = target / rel_path
         if component_path.exists():
@@ -286,7 +286,7 @@ def run(args):
         plan = load_plan(target / args.plan)
         generator = workflow_generator(plan)
         harnesses = workflow_harnesses(plan)
-        model_note = f" (default model: {plan['model']})" if plan.get("model") else ""
+        model_note = f" (generator model: {plan['model']})" if plan.get("model") else ""
         print(f"Scaffolding '{plan['name']}' with {generator}{model_note}; targets: {', '.join(harnesses)} in {target}")
         if args.dry_run:
             print("(dry run: nothing will be changed)")

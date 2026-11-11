@@ -9,11 +9,14 @@ from .sync import _component_name, _markdown_parts
 HARNESS_HINTS = {
     "opencode": (
         "# mode: primary",
-        "# temperature: 0.2",
-        "# tools:",
-        "#   write: true",
-        "# permission:",
-        "#   edit: ask",
+        "# permissions:",
+        "#   - action: edit",
+        '#     resource: "*"',
+        "#     effect: deny",
+        "# steps: 8",
+        "# hidden: true",
+        '# color: "#ff6b6b"',
+        "# Set model on the agent in workflow-plan.yaml, not in this override.",
     ),
     "claude-code": (
         "# model: sonnet",

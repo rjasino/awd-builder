@@ -101,6 +101,40 @@ class MemoryScaffoldTests(unittest.TestCase):
         self.assertIn("ask the user whether it should be saved", prompt)
         self.assertIn("Never save anything without explicit approval", prompt)
 
+    def test_agent_prompt_only_uses_an_explicit_agent_model(self):
+        item = {"name": "planner", "description": "Plans work", "instructions": "Make a plan."}
+        prompt, _ = build_prompt("agent", item, "opencode")
+        self.assertNotIn("`model` frontmatter", prompt)
+
+        prompt, _ = build_prompt(
+            "agent",
+            item,
+            "opencode",
+            "opencode-go/claude-haiku-5-5",
+        )
+        self.assertIn(
+            '`model` frontmatter field to exactly "opencode-go/claude-haiku-5-5"',
+            prompt,
+        )
+
+    def test_generator_model_is_not_added_to_scaffolded_agent_prompts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            plan = {
+                "name": "sample",
+                "generator": "opencode",
+                "harnesses": ["opencode"],
+                "model": "opencode-go/claude-haiku-5-5",
+                "agents": [
+                    {"name": "planner", "description": "Plans work", "instructions": "Make a plan."}
+                ],
+            }
+
+            with redirect_stdout(StringIO()) as output:
+                scaffold(plan, target, dry_run=True)
+
+            self.assertNotIn("`model` frontmatter", output.getvalue())
+
     def test_bundled_skill_and_command_cover_all_memory_operations(self):
         skill = (Path(__file__).resolve().parents[1] / "src/awd_builder/skills/workflow-memory/SKILL.md").read_text(
             encoding="utf-8"

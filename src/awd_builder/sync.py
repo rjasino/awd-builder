@@ -16,11 +16,31 @@ from .lib import (
     NAME_PATTERN,
     PLAN_FILE,
     WorkflowError,
+    check_opencode_model,
     load_plan,
     workflow_harnesses,
 )
 
 SYNC_MANIFEST = Path(".awd-builder/sync-manifest.json")
+OPENCODE_AGENT_FIELDS = {
+    "description",
+    "mode",
+    "permissions",
+    "steps",
+    "hidden",
+    "color",
+    "disabled",
+    "request",
+}
+OPENCODE_DEPRECATED_AGENT_FIELDS = {
+    "temperature",
+    "top_p",
+    "prompt",
+    "permission",
+    "tools",
+    "disable",
+    "maxSteps",
+}
 SPEC_KIT_INTEGRATIONS = {
     "opencode": "opencode",
     "claude-code": "claude",
@@ -137,6 +157,24 @@ def _agent_overrides(target, harness, source):
         raise WorkflowError(
             f"agent override {path} cannot set 'name'; the canonical agent name determines the output identity"
         )
+    if harness == "opencode":
+        deprecated = sorted(set(overrides) & OPENCODE_DEPRECATED_AGENT_FIELDS)
+        if deprecated:
+            raise WorkflowError(
+                f"agent override {path} uses deprecated OpenCode V1 fields: "
+                f"{', '.join(deprecated)}; use V2 fields such as 'permissions' instead"
+            )
+        if "model" in overrides:
+            raise WorkflowError(
+                f"agent override {path} cannot set 'model'; set 'model' on the agent "
+                "in workflow-plan.yaml instead"
+            )
+        unsupported = sorted(set(overrides) - OPENCODE_AGENT_FIELDS)
+        if unsupported:
+            raise WorkflowError(
+                f"agent override {path} has unsupported OpenCode V2 fields: "
+                f"{', '.join(unsupported)}"
+            )
     if harness == "codex" and "developer_instructions" in overrides:
         raise WorkflowError(
             f"agent override {path} cannot set 'developer_instructions'; "
@@ -192,6 +230,7 @@ def _agent_output(harness, source, overrides=None):
     if harness == "opencode":
         fields = {"description": description, "mode": "subagent"}
         if model:
+            check_opencode_model(model, f"'model' in {source}")
             fields["model"] = model
         return Path(".opencode/agents") / f"{name}.md", _yaml_frontmatter(
             _merge_metadata(fields, overrides), body

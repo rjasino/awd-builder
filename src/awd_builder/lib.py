@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+OPENCODE_MODEL_PATTERN = re.compile(r"^[^\s#/]+/[^\s#]+(?:#[^\s#]+)?$")
 PLAN_FILE = "workflow-plan.yaml"
 APP_PLAN_FILE = "app-workflow-plan.yaml"
 EVAL_FILE = "evals/routing.yaml"
@@ -98,7 +99,10 @@ def validate_plan(plan):
     if generator not in GENERATOR_NAMES:
         raise WorkflowError(f"'generator' must be one of: {', '.join(GENERATOR_NAMES)}")
     if plan.get("model") is not None:
-        check_model(plan["model"], "'model'")
+        if generator == "opencode":
+            check_opencode_model(plan["model"], "'model'")
+        else:
+            check_model(plan["model"], "'model'")
 
     check_folders(plan.get("folders") or [])
 
@@ -119,7 +123,11 @@ def validate_plan(plan):
             if item.get("model") is not None:
                 if kind != "agents":
                     raise WorkflowError(f"'model' is only supported on agents, not on '{name}' in '{kind}'")
-                check_model(item["model"], f"'model' of agent '{name}'")
+                where = f"'model' of agent '{name}'"
+                if "opencode" in harnesses:
+                    check_opencode_model(item["model"], where)
+                else:
+                    check_model(item["model"], where)
 
 
 def check_folders(folders):
@@ -133,6 +141,15 @@ def check_folders(folders):
 def check_model(value, where):
     if not isinstance(value, str) or not value.strip():
         raise WorkflowError(f"{where} must be a non-empty string, for example sonnet or opencode-go/claude-haiku-5-5")
+
+
+def check_opencode_model(value, where):
+    check_model(value, where)
+    if not OPENCODE_MODEL_PATTERN.fullmatch(value):
+        raise WorkflowError(
+            f"{where} must use OpenCode's provider/model format with an optional #variant, "
+            "for example opencode-go/claude-haiku-5-5"
+        )
 
 
 def components(plan):

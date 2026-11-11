@@ -19,9 +19,9 @@ harnesses:
   # - pi
   # - cursor
 
-# Model passed to the generator and routing evals, and written into generated
-# agent files that do not set their own. Use a model name the generator accepts.
-# Leave it out to use the generator's default model.
+# Model used by the generator and routing evals. It is not copied into
+# generated agents. Use a model name the generator accepts. Leave it out to use
+# the generator's default model.
 model: sonnet
 
 # Folders to create in the project, relative to its root.
@@ -33,8 +33,9 @@ folders:
 agents:
   - name: planner
     description: Breaks a feature request into ordered implementation tasks. Use when the user asks for a plan or a task breakdown before coding.
-    # Optional: overrides the top-level model for this agent only, in the same format.
-    # model: opus
+    # Optional: model for this generated agent. This is separate from the
+    # top-level generator model. For an OpenCode target, use provider/model.
+    # model: sonnet
     instructions: |
       Read the request and any relevant docs in docs/.
       Produce a numbered task list. Each task has a short title and acceptance criteria.

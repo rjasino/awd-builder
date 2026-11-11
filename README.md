@@ -46,7 +46,7 @@ python scripts/install.py
 
    Edit `<project>/workflow-plan.yaml`. Set `generator` to `claude-code` or `opencode` (the CLI that authors canonical files), choose one or more output `harnesses`, and list the folders, agents, skills, and commands you want. Supported output harnesses are `opencode`, `claude-code`, `codex`, `github-copilot`, `pi`, and `cursor`. Existing plans using the old `tool` field remain valid and map that tool as both generator and single output harness.
 
-   Set `model` to the model name your generator accepts, for example `sonnet` for Claude Code or `opencode-go/claude-haiku-5-5` for OpenCode. It is used for scaffolding and routing evals. Each agent can set its own `model` to override it. Leave it out to use the generator's default.
+   Set `model` to the model name your generator accepts, for example `sonnet` for Claude Code or `opencode-go/claude-haiku-5-5` for OpenCode. It is used only for scaffolding and routing evals and is not copied into generated agents. To choose an agent's model, set `model` on that entry under `agents`. For an OpenCode target, use `provider/model` with an optional `#variant`. Leave the top-level model out to use the generator's default.
 
 2. Preview, then scaffold:
 
@@ -63,12 +63,14 @@ python scripts/install.py
 
    ```yaml
    mode: primary
-   temperature: 0.2
-   tools:
-     write: true
+   permissions:
+     - action: edit
+       resource: "*"
+       effect: deny
+   steps: 8
    ```
 
-   Sync merges these fields into the generated agent metadata; override values take precedence over generated metadata, and a `null` value removes a generated field. The canonical agent name and instruction body remain controlled by `.agents/agents/<agent-name>.md`. For Codex, overrides are emitted as TOML fields, and `developer_instructions` cannot be overridden.
+   Sync merges these fields into the generated agent metadata; override values take precedence over generated metadata, and a `null` value removes a generated field. The canonical agent name and instruction body remain controlled by `.agents/agents/<agent-name>.md`. OpenCode overrides use V2 fields; set an agent's model under `agents` in the plan rather than in an OpenCode override. For Codex, overrides are emitted as TOML fields, and `developer_instructions` cannot be overridden.
 
    The generated workflow has private, project-local memory at `.awd-builder/memory/memories.json`; this store is gitignored. Generated agents are instructed to recall relevant memories and ask before saving useful new information. Use `/memory remember`, `/memory recall`, `/memory forget`, `/memory compact`, `/memory export`, or `/memory import` to manage it. The built-in skill/command names `workflow-memory` and `memory` are reserved.
 

@@ -32,6 +32,32 @@ class HarnessPlanTests(unittest.TestCase):
             with self.subTest(harnesses=harnesses), self.assertRaises(WorkflowError):
                 validate_plan({"name": "invalid", "generator": "claude-code", "harnesses": harnesses})
 
+    def test_opencode_generator_model_uses_provider_model_format(self):
+        plan = {
+            "name": "sample",
+            "generator": "opencode",
+            "harnesses": ["claude-code"],
+            "model": "sonnet",
+        }
+        with self.assertRaisesRegex(WorkflowError, "provider/model"):
+            validate_plan(plan)
+        plan["model"] = "opencode-go/claude-haiku-5-5"
+        validate_plan(plan)
+
+    def test_opencode_target_agent_model_uses_provider_model_format(self):
+        plan = {
+            "name": "sample",
+            "generator": "claude-code",
+            "harnesses": ["opencode"],
+            "agents": [
+                {"name": "planner", "description": "Plans work", "model": "sonnet"}
+            ],
+        }
+        with self.assertRaisesRegex(WorkflowError, "provider/model"):
+            validate_plan(plan)
+        plan["agents"][0]["model"] = "opencode-go/claude-haiku-5-5#high"
+        validate_plan(plan)
+
 
 if __name__ == "__main__":
     unittest.main()

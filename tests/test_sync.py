@@ -16,7 +16,7 @@ class SyncTests(unittest.TestCase):
         agent = target / CANONICAL_AGENTS / "planner.md"
         agent.parent.mkdir(parents=True)
         agent.write_text(
-            "---\nname: planner\ndescription: Plans features\nmodel: sonnet\n---\n\nPlan work carefully.\n",
+            "---\nname: planner\ndescription: Plans features\nmodel: opencode/test-model\n---\n\nPlan work carefully.\n",
             encoding="utf-8",
         )
         command = target / CANONICAL_COMMANDS / "review.md"
@@ -91,10 +91,14 @@ class SyncTests(unittest.TestCase):
             override = target / ".awd-builder/overrides/opencode/agents/planner.yaml"
             override.parent.mkdir(parents=True)
             override.write_text(
-                "model: opencode/custom-model\n"
                 "mode: primary\n"
-                "temperature: 0.2\n"
-                "permission:\n  edit: ask\n",
+                "permissions:\n"
+                "  - action: edit\n"
+                '    resource: "*"\n'
+                "    effect: deny\n"
+                "steps: 8\n"
+                "hidden: true\n"
+                'color: "#ff6b6b"\n',
                 encoding="utf-8",
             )
 
@@ -103,10 +107,15 @@ class SyncTests(unittest.TestCase):
 
             destination = target / ".opencode/agents/planner.md"
             first_output = destination.read_text(encoding="utf-8")
-            self.assertIn('model: "opencode/custom-model"', first_output)
+            self.assertIn('model: "opencode/test-model"', first_output)
             self.assertIn('mode: "primary"', first_output)
-            self.assertIn('temperature: 0.2', first_output)
-            self.assertIn('permission: {"edit": "ask"}', first_output)
+            self.assertIn(
+                'permissions: [{"action": "edit", "resource": "*", "effect": "deny"}]',
+                first_output,
+            )
+            self.assertIn("steps: 8", first_output)
+            self.assertIn("hidden: true", first_output)
+            self.assertIn('color: "#ff6b6b"', first_output)
             self.assertIn("Plan work carefully.", first_output)
 
             canonical = target / CANONICAL_AGENTS / "planner.md"
@@ -120,9 +129,42 @@ class SyncTests(unittest.TestCase):
                 sync_workflow(target, ["opencode"])
 
             updated_output = destination.read_text(encoding="utf-8")
-            self.assertIn('model: "opencode/custom-model"', updated_output)
             self.assertIn('mode: "primary"', updated_output)
             self.assertIn("Plan work carefully and verify.", updated_output)
+
+    def test_opencode_overrides_reject_v1_fields_and_model(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_canonical_workflow(target)
+            override = target / ".awd-builder/overrides/opencode/agents/planner.yaml"
+            override.parent.mkdir(parents=True)
+
+            for content, message in (
+                ("temperature: 0.2\n", "deprecated OpenCode V1 fields"),
+                ("tools:\n  write: true\n", "deprecated OpenCode V1 fields"),
+                ("model: opencode/custom-model\n", "workflow-plan.yaml"),
+                ("system: replace instructions\n", "unsupported OpenCode V2 fields"),
+                ("unknown: value\n", "unsupported OpenCode V2 fields"),
+            ):
+                with self.subTest(content=content):
+                    override.write_text(content, encoding="utf-8")
+                    with self.assertRaisesRegex(WorkflowError, message):
+                        sync_workflow(target, ["opencode"])
+
+    def test_opencode_agent_model_must_use_provider_model_format(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_canonical_workflow(target)
+            canonical = target / CANONICAL_AGENTS / "planner.md"
+            canonical.write_text(
+                canonical.read_text(encoding="utf-8").replace(
+                    "opencode/test-model", "sonnet"
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(WorkflowError, "provider/model"):
+                sync_workflow(target, ["opencode"])
 
     def test_codex_overrides_are_toml_fields_but_cannot_replace_instructions(self):
         with tempfile.TemporaryDirectory() as temp:

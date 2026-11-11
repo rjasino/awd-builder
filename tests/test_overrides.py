@@ -40,7 +40,13 @@ class OverrideInitTests(unittest.TestCase):
             content = destination.read_text(encoding="utf-8")
             self.assertIn("Harness-specific metadata", content)
             self.assertIn("# mode: primary", content)
-            self.assertIn("# permission:", content)
+            self.assertIn("# permissions:", content)
+            self.assertIn("#   - action: edit", content)
+            self.assertIn("# steps: 8", content)
+            self.assertIn("Set model on the agent in workflow-plan.yaml", content)
+            self.assertNotIn("# temperature:", content)
+            self.assertNotIn("# tools:", content)
+            self.assertNotIn("# permission:", content)
 
     def test_does_not_overwrite_existing_override(self):
         with tempfile.TemporaryDirectory() as temp:
