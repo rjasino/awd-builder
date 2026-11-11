@@ -59,6 +59,17 @@ python scripts/install.py
 
    Canonical source files live in `.agents/agents`, `.agents/skills`, and `.agents/commands`. Use `awd-builder sync <project>` to re-sync after editing canonical files. Synced outputs are tracked in `.awd-builder/sync-manifest.json`; conflicts with untracked or locally modified target files stop the sync. Review before using `awd-builder sync <project> --force`, which overwrites those files. Sync does not delete stale outputs when a component or harness is removed from the plan.
 
+   Generate a starter override with `awd-builder overrides init <project> --harness opencode --agent planner`. This creates `.awd-builder/overrides/opencode/agents/planner.yaml` without overwriting an existing file. Keep harness-specific agent metadata in these override files rather than editing generated agent files. For example, an OpenCode override can contain:
+
+   ```yaml
+   mode: primary
+   temperature: 0.2
+   tools:
+     write: true
+   ```
+
+   Sync merges these fields into the generated agent metadata; override values take precedence over generated metadata, and a `null` value removes a generated field. The canonical agent name and instruction body remain controlled by `.agents/agents/<agent-name>.md`. For Codex, overrides are emitted as TOML fields, and `developer_instructions` cannot be overridden.
+
    The generated workflow has private, project-local memory at `.awd-builder/memory/memories.json`; this store is gitignored. Generated agents are instructed to recall relevant memories and ask before saving useful new information. Use `/memory remember`, `/memory recall`, `/memory forget`, `/memory compact`, `/memory export`, or `/memory import` to manage it. The built-in skill/command names `workflow-memory` and `memory` are reserved.
 
    Re-running `scaffold run` is safe: it creates missing canonical components and syncs target copies. Existing generated files are not regenerated. Edit the canonical file or remove it to change/regenerate a component.
@@ -109,6 +120,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
 | `awd-builder evals init [p]`    | Generate routing eval cases in `evals/routing.yaml`                 |
 | `awd-builder evals run [p]`     | Run routing evals and save a JSON report to `evals/results.json`     |
 | `awd-builder sync <p>`          | Sync canonical `.agents` components to selected harnesses           |
+| `awd-builder overrides init [p] --harness H --agent A` | Create a starter harness-specific agent override YAML |
 | `awd-builder app init [p]`      | Write an `app-workflow-plan.yaml` template into a project            |
 | `awd-builder app run [p]`       | Scaffold a Spec Kit app for all selected harness integrations        |
 

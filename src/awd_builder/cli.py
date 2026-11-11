@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from . import __version__, app, evals, scaffold, sync
+from . import __version__, app, evals, overrides, scaffold, sync
 
 
 def build_parser():
@@ -21,6 +21,7 @@ def build_parser():
     app.register(subparsers)
     evals.register(subparsers)
     sync.register(subparsers)
+    overrides.register(subparsers)
     return parser
 
 

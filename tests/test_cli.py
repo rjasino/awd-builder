@@ -18,6 +18,7 @@ class CliDefaultTargetTests(unittest.TestCase):
             ["app", "run"],
             ["evals", "init"],
             ["evals", "run"],
+            ["overrides", "init", "--harness", "opencode", "--agent", "planner"],
         )
         for command in commands:
             with self.subTest(command=command):

@@ -84,6 +84,69 @@ class SyncTests(unittest.TestCase):
             with self.assertRaisesRegex(WorkflowError, "locally modified"):
                 sync_workflow(target, ["claude-code"])
 
+    def test_agent_overrides_add_harness_metadata_without_owning_instructions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_canonical_workflow(target)
+            override = target / ".awd-builder/overrides/opencode/agents/planner.yaml"
+            override.parent.mkdir(parents=True)
+            override.write_text(
+                "model: opencode/custom-model\n"
+                "mode: primary\n"
+                "temperature: 0.2\n"
+                "permission:\n  edit: ask\n",
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                sync_workflow(target, ["opencode"])
+
+            destination = target / ".opencode/agents/planner.md"
+            first_output = destination.read_text(encoding="utf-8")
+            self.assertIn('model: "opencode/custom-model"', first_output)
+            self.assertIn('mode: "primary"', first_output)
+            self.assertIn('temperature: 0.2', first_output)
+            self.assertIn('permission: {"edit": "ask"}', first_output)
+            self.assertIn("Plan work carefully.", first_output)
+
+            canonical = target / CANONICAL_AGENTS / "planner.md"
+            canonical.write_text(
+                canonical.read_text(encoding="utf-8").replace(
+                    "Plan work carefully.", "Plan work carefully and verify."
+                ),
+                encoding="utf-8",
+            )
+            with redirect_stdout(StringIO()):
+                sync_workflow(target, ["opencode"])
+
+            updated_output = destination.read_text(encoding="utf-8")
+            self.assertIn('model: "opencode/custom-model"', updated_output)
+            self.assertIn('mode: "primary"', updated_output)
+            self.assertIn("Plan work carefully and verify.", updated_output)
+
+    def test_codex_overrides_are_toml_fields_but_cannot_replace_instructions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_canonical_workflow(target)
+            override = target / ".awd-builder/overrides/codex/agents/planner.yaml"
+            override.parent.mkdir(parents=True)
+            override.write_text(
+                'sandbox_mode: workspace-write\napproval_policy: "never"\nfeatures: [one, two]\n',
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                sync_workflow(target, ["codex"])
+            output = (target / ".codex/agents/planner.toml").read_text(encoding="utf-8")
+            self.assertIn('sandbox_mode = "workspace-write"', output)
+            self.assertIn('approval_policy = "never"', output)
+            self.assertIn('features = ["one", "two"]', output)
+            self.assertIn('developer_instructions = "Plan work carefully.\\n"', output)
+
+            override.write_text("developer_instructions: Replace canonical instructions\n", encoding="utf-8")
+            with self.assertRaisesRegex(WorkflowError, "developer_instructions"):
+                sync_workflow(target, ["codex"])
+
 
 if __name__ == "__main__":
     unittest.main()
