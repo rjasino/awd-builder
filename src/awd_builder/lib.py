@@ -222,6 +222,10 @@ def run_agent(tool_name, prompt, cwd, *, write, timeout, model=None):
         prompt_file = Path(temp_dir) / "prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")
         args = [exe, "run"]
+        if tool_name == "opencode":
+            # Ignore a project's workflow default agent (for example, game-producer)
+            # for awd-builder automation; use OpenCode's standard build agent.
+            args += ["--agent", "build"]
         if write:
             args.append("--auto")
         args += [*model_args, "--file", str(prompt_file), "Follow the attached instructions."]

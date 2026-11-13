@@ -48,6 +48,8 @@ python scripts/install.py
 
    Set `model` to the model name your generator accepts, for example `sonnet` for Claude Code or `opencode-go/claude-haiku-5-5` for OpenCode. It is used only for scaffolding and routing evals and is not copied into generated agents. To choose an agent's model, set `model` on that entry under `agents`. For an OpenCode target, use `provider/model` with an optional `#variant`. Leave the top-level model out to use the generator's default.
 
+   When OpenCode is the generator, `awd-builder` explicitly runs its built-in `build` agent so a project-specific `default_agent` does not take over scaffolding or eval tasks.
+
 2. Preview, then scaffold:
 
    ```
@@ -82,7 +84,7 @@ python scripts/install.py
    awd-builder evals init
    ```
 
-   This uses the `eval-creator` skill to write `evals/routing.yaml`. Use `--dry-run` to preview the prompt or `--force` to replace an existing eval file. Review and edit the generated cases as needed.
+   This uses the `eval-creator` skill to write `evals/routing.yaml` from the current canonical files in `.agents/`, so direct edits to agents, skills, or commands are reflected without updating the component list in `workflow-plan.yaml`. The plan still provides workflow metadata and generator settings. Use `--dry-run` to preview the prompt or `--force` to replace an existing eval file. Review and edit the generated cases as needed.
 
 4. Run the routing evals:
 

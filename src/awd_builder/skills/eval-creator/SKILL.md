@@ -11,11 +11,12 @@ Do not write checks for output quality, style, or the correctness of what an age
 
 ## Inputs
 
-- `workflow-plan.yaml` in the project root. It is the source of truth for every agent, skill, and command. Read it first.
+- `workflow-plan.yaml` in the project root for workflow metadata only (such as the workflow name).
+- Current canonical components under `.agents/agents/`, `.agents/skills/`, and `.agents/commands/`. These are the source of truth for current IDs and descriptions; the component lists in the plan may be stale after direct edits.
 
 ## Steps
 
-1. Read `workflow-plan.yaml`. List every agent and skill with its `name` and `description`. Slash commands are invoked explicitly by the user with `/name`, so leave them out of this suite.
+1. Read the workflow name from `workflow-plan.yaml`. Build the current component list from canonical files: agents under `.agents/agents/`, skills in `.agents/skills/**/SKILL.md`, and commands under `.agents/commands/`. Use agent/command frontmatter `name` (or the filename when absent) as their ID. A skill's ID is the directory containing its `SKILL.md`; its frontmatter `name` is only a display name. Use current canonical descriptions, not the plan's component entries.
 2. Find overlaps: pairs of agents or skills whose descriptions could both fit the same request.
 3. Write cases in these groups:
    - **Direct** (at least 2 per agent or skill): a request that clearly belongs to that component, phrased the way a user would type it.
@@ -27,7 +28,7 @@ Do not write checks for output quality, style, or the correctness of what an age
 6. Validate before you finish:
    - The YAML parses.
    - Every `id` is unique and kebab-case.
-   - Every `expected` is `none`, or `agent/<name>` or `skill/<name>` where `<name>` exists in the plan with that kind.
+   - Every `expected` is `none`, or `agent/<name>`, `skill/<name>`, or `command/<name>` where `<name>` exists in the canonical files with that kind.
    - No prompt is empty.
 7. Report the case count per group and the path of the file. Then tell the user the next step: run the runner (see Running).
 
@@ -53,9 +54,10 @@ cases:
 
 Rules for the file:
 
-- `expected` is `agent/<name>`, `skill/<name>`, or `none`. Names are lowercase kebab-case and must exist in the plan.
+- `expected` is `agent/<name>`, `skill/<name>`, `command/<name>`, or `none`. Names are lowercase kebab-case and must exist in the canonical files.
 - `id` values are unique across the file. Use `<component>-<group>-<n>`, for example `code-review-direct-1`.
 - Use only the fields `id`, `prompt`, and `expected`. The runner reads nothing else.
+- Commands are explicitly invoked by the user with `/name`; do not generate command cases unless the prompt explicitly invokes that command.
 
 ## Running
 
