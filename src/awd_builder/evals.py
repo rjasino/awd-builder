@@ -1,8 +1,11 @@
 """`awd-builder evals`: generate and run workflow-wide routing evals."""
 
 import json
+import hashlib
 import re
+import shutil
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +14,8 @@ from .lib import (
     CANONICAL_COMMANDS,
     CANONICAL_SKILLS,
     EVAL_FILE,
+    GENERATOR_NAMES,
+    HARNESS_NAMES,
     NAME_PATTERN,
     PLAN_FILE,
     WorkflowError,
@@ -132,6 +137,44 @@ def format_component_catalog(inventory):
     )
 
 
+def _populate_eval_workspace(target, workspace, plan, *, evals_path=None, results_path=None):
+    """Copy only canonical workflow context into an isolated generator workspace."""
+    target = Path(target)
+    workspace = Path(workspace)
+    try:
+        for relative in (CANONICAL_AGENTS, CANONICAL_SKILLS, CANONICAL_COMMANDS):
+            source = target / relative
+            if not source.is_dir():
+                continue
+            if source.is_symlink() or any(path.is_symlink() for path in source.rglob("*")):
+                raise WorkflowError(f"canonical directory contains a symlink and cannot be isolated safely: {source}")
+            destination = workspace / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source, destination)
+
+        # Keep plan metadata only; its component lists can be stale.
+        clean_plan = {
+            "name": plan["name"],
+            "generator": workflow_generator(plan),
+            "harnesses": workflow_harnesses(plan),
+        }
+        plan_copy = workspace / PLAN_FILE
+        plan_copy.write_text(json.dumps(clean_plan, indent=2) + "\n", encoding="utf-8")
+
+        for source, relative in (
+            (evals_path, Path(EVAL_FILE)),
+            (results_path, Path(DEFAULT_RESULTS_FILE)),
+        ):
+            if source is not None:
+                destination = workspace / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+    except WorkflowError:
+        raise
+    except OSError as error:
+        raise WorkflowError(f"could not prepare isolated eval workspace: {error}") from error
+
+
 def load_cases(evals_path, inventory):
     data = load_yaml(evals_path)
     cases = data.get("cases") if isinstance(data, dict) else None
@@ -175,8 +218,67 @@ def parse_route(output):
     return f"{last.group(1).lower()}/{last.group(2).lower()}"
 
 
-def save_results(path, plan, evals_path, results):
+def snapshot_components(target, inventory):
+    snapshot = []
+    for item in inventory:
+        source = Path(item["path"])
+        try:
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            relative = source.relative_to(target).as_posix()
+        except (OSError, ValueError) as error:
+            raise WorkflowError(f"could not snapshot canonical component {source}: {error}") from error
+        snapshot.append({
+            "kind": item["kind"],
+            "id": item["name"],
+            "description": item["description"],
+            "path": relative,
+            "sha256": digest,
+        })
+    return snapshot
+
+
+def component_drift(target, recorded_snapshot):
+    if not isinstance(recorded_snapshot, list):
+        return ["results do not contain a canonical component snapshot"]
+    current = load_canonical_components(target)
+    current_snapshot = snapshot_components(target, current)
+    try:
+        expected = {
+            (item["kind"], item["id"], item["path"]): item["sha256"]
+            for item in recorded_snapshot
+        }
+    except (KeyError, TypeError) as error:
+        raise WorkflowError("results file has an invalid canonical component snapshot") from error
+    actual = {
+        (item["kind"], item["id"], item["path"]): item["sha256"]
+        for item in current_snapshot
+    }
+    differences = []
+    for key in sorted(set(expected) | set(actual)):
+        if expected.get(key) != actual.get(key):
+            differences.append("/".join(key))
+    return differences
+
+
+def save_results(
+    path,
+    plan,
+    evals_path,
+    results,
+    *,
+    eval_harness,
+    eval_model,
+    inventory,
+    target,
+    component_snapshot=None,
+    evals_sha256=None,
+):
     passed = sum(result["passed"] for result in results)
+    if evals_sha256 is None:
+        try:
+            evals_sha256 = hashlib.sha256((Path(target) / evals_path).read_bytes()).hexdigest()
+        except OSError as error:
+            raise WorkflowError(f"could not snapshot eval cases {evals_path}: {error}") from error
     payload = {
         "format": "awd-builder-routing-eval-results",
         "version": 1,
@@ -184,8 +286,12 @@ def save_results(path, plan, evals_path, results):
         "workflow": plan["name"],
         "tool": workflow_generator(plan),
         "harnesses": workflow_harnesses(plan),
-        "model": plan.get("model"),
+        "eval_harness": eval_harness,
+        "model": eval_model,
+        "generator_model": plan.get("model"),
+        "components": component_snapshot or snapshot_components(target, inventory),
         "evals_file": str(evals_path),
+        "evals_sha256": evals_sha256,
         "summary": {
             "total": len(results),
             "passed": passed,
@@ -263,7 +369,63 @@ def build_analysis_prompt(plan_path, evals_path, results_path, payload, inventor
     )
 
 
-def save_summary(path, payload, analysis=None, analysis_error=None):
+_UNSET = object()
+
+
+def analyze_in_isolation(
+    target,
+    plan,
+    evals_path,
+    results_path,
+    payload,
+    inventory,
+    timeout,
+    *,
+    generator=None,
+    model=_UNSET,
+):
+    generator = generator or workflow_generator(plan)
+    if model is _UNSET:
+        model = plan.get("model")
+    try:
+        with tempfile.TemporaryDirectory(prefix="awd-builder-evals-diagnose-") as temp:
+            workspace = Path(temp)
+            _populate_eval_workspace(
+                target,
+                workspace,
+                plan,
+                evals_path=evals_path,
+                results_path=results_path,
+            )
+            prompt = build_analysis_prompt(
+                workspace / PLAN_FILE,
+                workspace / EVAL_FILE,
+                workspace / DEFAULT_RESULTS_FILE,
+                payload,
+                inventory,
+            )
+            code, stdout, stderr = run_agent(
+                generator,
+                prompt,
+                workspace,
+                write=False,
+                timeout=timeout,
+                model=model,
+                agent="build",
+            )
+            if code != 0:
+                detail = "\n".join(
+                    part for part in (stderr.strip(), stdout.strip()) if part
+                ).strip()
+                return None, detail[-500:] or f"generator exited with code {code}"
+            if stdout.strip():
+                return stdout.strip(), None
+            return None, "generator returned no analysis"
+    except (WorkflowError, OSError) as error:
+        return None, str(error)
+
+
+def save_summary(path, payload, analysis=None, analysis_error=None, context_note=None):
     summary = payload["summary"]
     total = summary["total"]
     failed = summary["failed"]
@@ -273,8 +435,10 @@ def save_summary(path, payload, analysis=None, analysis_error=None):
         "",
         f"- Workflow: `{payload['workflow']}`",
         f"- Generator: `{payload['tool']}`",
+        f"- Evaluated harness: `{payload.get('eval_harness') or 'legacy generator runtime'}`",
         f"- Harnesses: `{', '.join(payload['harnesses'])}`",
-        f"- Model: `{payload['model'] or 'generator default'}`",
+        f"- Eval model: `{payload.get('model') or 'harness default'}`",
+        f"- Generator model: `{payload.get('generator_model') or 'generator default'}`",
         f"- Run at: `{payload['run_at']}`",
         f"- Cases: `{total}` total, `{summary['passed']}` passed, `{failed}` failed",
         "",
@@ -299,13 +463,15 @@ def save_summary(path, payload, analysis=None, analysis_error=None):
             "",
             analysis.strip(),
         ))
-    elif analysis_error:
+    if analysis_error:
         lines.extend((
             "",
             "## Failure Analysis",
             "",
             f"_Failure analysis unavailable: {analysis_error}_",
         ))
+    if context_note:
+        lines.extend(("", f"> **Context note:** {context_note}"))
 
     failed_results = [result for result in payload["results"] if not result["passed"]]
     if failed_results:
@@ -375,7 +541,7 @@ def init(args):
 
     generator = workflow_generator(plan)
     prompt = EVAL_CREATION_PROMPT.format(
-        plan=args.plan,
+        plan=PLAN_FILE,
         evals=EVAL_FILE,
         agents=CANONICAL_AGENTS.as_posix(),
         skills=CANONICAL_SKILLS.as_posix(),
@@ -391,26 +557,61 @@ def init(args):
         return 0
 
     try:
-        code, stdout, stderr = run_agent(
-            generator,
-            prompt,
-            target,
-            write=True,
-            timeout=args.timeout,
-            model=plan.get("model"),
-        )
-        if code != 0 or not evals_path.is_file():
-            detail = "\n".join(part for part in (stderr.strip(), stdout.strip()) if part)[-500:]
-            reason = detail or f"agent exited with code {code} and did not write {EVAL_FILE}"
-            raise WorkflowError(f"could not generate routing evals: {reason}")
-        cases = load_cases(evals_path, inventory)
+        with tempfile.TemporaryDirectory(prefix="awd-builder-evals-init-") as temp:
+            workspace = Path(temp)
+            _populate_eval_workspace(target, workspace, plan)
+            code, stdout, stderr = run_agent(
+                generator,
+                prompt,
+                workspace,
+                write=True,
+                timeout=args.timeout,
+                model=plan.get("model"),
+                agent="build",
+            )
+            generated_path = workspace / EVAL_FILE
+            if code != 0 or not generated_path.is_file():
+                detail = "\n".join(part for part in (stderr.strip(), stdout.strip()) if part)[-500:]
+                reason = detail or f"agent exited with code {code} and did not write {EVAL_FILE}"
+                raise WorkflowError(f"could not generate routing evals: {reason}")
+            cases = load_cases(generated_path, inventory)
+            generated_contents = generated_path.read_bytes()
+        evals_path.parent.mkdir(parents=True, exist_ok=True)
+        evals_path.write_bytes(generated_contents)
     except WorkflowError as error:
         print(f"error: {error}", file=sys.stderr)
+        return 2
+    except OSError as error:
+        print(f"error: could not save generated routing evals: {error}", file=sys.stderr)
         return 2
 
     print(f"Generated {len(cases)} routing case(s) in {evals_path}")
     print(f'Edit the cases if needed, then run: awd-builder evals run "{target}"')
     return 0
+
+
+def resolve_eval_harness(plan, requested=None):
+    selected = workflow_harnesses(plan)
+    generator = workflow_generator(plan)
+    harness = requested
+    if harness is not None:
+        if harness not in selected:
+            raise WorkflowError(f"harness '{harness}' is not selected in workflow-plan.yaml")
+    elif generator in selected:
+        harness = generator
+    elif len(selected) == 1:
+        harness = selected[0]
+    elif len(selected) > 1:
+        raise WorkflowError("choose an eval target with --harness when multiple harnesses are selected")
+    else:
+        raise WorkflowError("the workflow plan must select an eval target harness")
+
+    if harness not in GENERATOR_NAMES:
+        raise WorkflowError(
+            f"eval execution for '{harness}' is not supported yet; supported eval harnesses are: "
+            f"{', '.join(GENERATOR_NAMES)}"
+        )
+    return harness
 
 
 def run(args):
@@ -429,7 +630,13 @@ def run(args):
                 "the summary output must not overwrite the workflow plan, eval cases, or results JSON"
             )
         plan = load_plan(plan_path)
+        eval_harness = resolve_eval_harness(plan, getattr(args, "harness", None))
         inventory = load_canonical_components(target)
+        component_snapshot = snapshot_components(target, inventory)
+        try:
+            evals_digest = hashlib.sha256(evals_path.read_bytes()).hexdigest()
+        except OSError as error:
+            raise WorkflowError(f"could not snapshot eval cases {evals_path}: {error}") from error
         cases = load_cases(evals_path, inventory)
         if args.only:
             cases = [case for case in cases if case["id"] in args.only]
@@ -446,22 +653,24 @@ def run(args):
             print(ROUTING_PROMPT.format(prompt=case["prompt"], catalog=catalog))
         return 0
 
-    tool = workflow_generator(plan)
-    model = plan.get("model")
-    model_note = f" model {model}" if model else ""
-    print(f"Running {len(cases)} routing case(s) for '{plan['name']}' with {tool}{model_note}\n")
+    generator = workflow_generator(plan)
+    print(
+        f"Running {len(cases)} routing case(s) for '{plan['name']}' "
+        f"against {eval_harness} workflow in {target}\n"
+    )
     catalog = format_component_catalog(inventory)
     failed = []
     results = []
     for case in cases:
         try:
             code, stdout, stderr = run_agent(
-                tool,
+                eval_harness,
                 ROUTING_PROMPT.format(prompt=case["prompt"], catalog=catalog),
                 target,
                 write=False,
                 timeout=args.timeout,
-                model=model,
+                model=None,
+                agent=None,
             )
         except WorkflowError as error:
             code, stdout, stderr = None, "", str(error)
@@ -489,41 +698,41 @@ def run(args):
     total = len(cases)
     print(f"\n{total - len(failed)}/{total} passed")
     try:
-        payload = save_results(output_path, plan, args.evals, results)
+        payload = save_results(
+            output_path,
+            plan,
+            args.evals,
+            results,
+            eval_harness=eval_harness,
+            eval_model=None,
+            inventory=inventory,
+            target=target,
+            component_snapshot=component_snapshot,
+            evals_sha256=evals_digest,
+        )
     except WorkflowError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
     analysis = None
     analysis_error = None
+    context_note = None
     if failed and not getattr(args, "no_analysis", False):
         print("Analyzing failed cases...")
-        prompt = build_analysis_prompt(plan_path, evals_path, output_path, payload, inventory)
-        try:
-            code, stdout, stderr = run_agent(
-                tool,
-                prompt,
-                target,
-                write=False,
-                timeout=args.timeout,
-                model=model,
-            )
-            if code != 0:
-                detail = "\n".join(
-                    part for part in (stderr.strip(), stdout.strip()) if part
-                ).strip()
-                analysis_error = detail[-500:] or f"generator exited with code {code}"
-            elif stdout.strip():
-                analysis = stdout.strip()
-            else:
-                analysis_error = "generator returned no analysis"
-        except WorkflowError as error:
-            analysis_error = str(error)
+        analysis, analysis_error = analyze_in_isolation(
+            target, plan, evals_path, output_path, payload, inventory, args.timeout
+        )
         if analysis_error:
             print(f"warning: failure analysis unavailable: {analysis_error}", file=sys.stderr)
 
     try:
-        save_summary(summary_path, payload, analysis=analysis, analysis_error=analysis_error)
+        save_summary(
+            summary_path,
+            payload,
+            analysis=analysis,
+            analysis_error=analysis_error,
+            context_note=context_note,
+        )
     except WorkflowError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
@@ -532,6 +741,100 @@ def run(args):
     if failed:
         print(f"failed: {', '.join(failed)}")
         return 1
+    return 0
+
+
+def diagnose(args):
+    target = Path(args.path).resolve()
+    plan_path = (target / args.plan).resolve()
+    evals_path = (target / args.evals).resolve()
+    results_path = (target / args.results).resolve()
+    summary_path = (target / args.summary).resolve()
+    try:
+        if summary_path in (plan_path, evals_path, results_path):
+            raise WorkflowError("the summary output must not overwrite the plan, eval cases, or results JSON")
+        plan = load_plan(plan_path)
+        inventory = load_canonical_components(target)
+        if not results_path.is_file():
+            raise WorkflowError(f"results file not found: {results_path}; run `awd-builder evals run` first")
+        try:
+            payload = json.loads(results_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise WorkflowError(f"could not read eval results {results_path}: {error}") from error
+        if not isinstance(payload, dict) or payload.get("format") != "awd-builder-routing-eval-results":
+            raise WorkflowError(f"invalid routing eval results file: {results_path}")
+        if not isinstance(payload.get("results"), list) or not isinstance(payload.get("summary"), dict):
+            raise WorkflowError(f"invalid routing eval results file: {results_path}")
+        if payload.get("tool") not in GENERATOR_NAMES:
+            raise WorkflowError(f"results file has unsupported generator metadata: {payload.get('tool')!r}")
+    except WorkflowError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+    try:
+        differences = component_drift(target, payload.get("components"))
+    except WorkflowError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    context_notes = []
+    if differences:
+        context_notes.append(
+            "Canonical component files differ from the snapshot recorded in results.json; "
+            "this diagnosis uses the current files: " + ", ".join(differences)
+        )
+    if (
+        payload.get("tool") != workflow_generator(plan)
+        or payload.get("generator_model") != plan.get("model")
+    ):
+        context_notes.append(
+            "Generator settings changed since the run; diagnosis uses the generator and model recorded in results.json."
+        )
+    try:
+        current_evals_digest = hashlib.sha256(evals_path.read_bytes()).hexdigest()
+        if payload.get("evals_sha256") and payload["evals_sha256"] != current_evals_digest:
+            context_notes.append("The routing eval file changed since this results report was created.")
+    except OSError as error:
+        print(f"error: could not read eval cases {evals_path}: {error}", file=sys.stderr)
+        return 2
+
+    failed = payload["summary"].get("failed", 0)
+    analysis = None
+    analysis_error = None
+    if failed:
+        diagnosis_plan = {
+            "name": payload.get("workflow", plan["name"]),
+            "generator": payload.get("tool", workflow_generator(plan)),
+            "harnesses": payload.get("harnesses", workflow_harnesses(plan)),
+            "model": payload.get("generator_model"),
+        }
+        analysis, analysis_error = analyze_in_isolation(
+            target,
+            diagnosis_plan,
+            evals_path,
+            results_path,
+            payload,
+            inventory,
+            args.timeout,
+            generator=payload.get("tool"),
+            model=payload.get("generator_model"),
+        )
+        if analysis_error:
+            print(f"warning: failure analysis unavailable: {analysis_error}", file=sys.stderr)
+
+    try:
+        save_summary(
+            summary_path,
+            payload,
+            analysis=analysis,
+            analysis_error=analysis_error,
+            context_note=" ".join(context_notes) if context_notes else None,
+        )
+    except WorkflowError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    print(f"summary saved to {summary_path}")
+    if not failed:
+        print("all routing cases passed; no failure diagnosis was needed")
     return 0
 
 
@@ -551,6 +854,7 @@ def register(subparsers):
     run_parser.add_argument("path", nargs="?", default=".", help="project folder (default: current folder)")
     run_parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to the project folder (default: {PLAN_FILE})")
     run_parser.add_argument("--evals", default=EVAL_FILE, help=f"eval file, relative to the project folder (default: {EVAL_FILE})")
+    run_parser.add_argument("--harness", choices=HARNESS_NAMES, help="workflow harness to evaluate (defaults to the generator when selected)")
     run_parser.add_argument("--only", action="append", default=[], metavar="ID", help="run only this case id (repeatable)")
     run_parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds per case (default: %(default)s)")
     run_parser.add_argument("--output", default=DEFAULT_RESULTS_FILE, help=f"results JSON path, relative to the project (default: {DEFAULT_RESULTS_FILE})")
@@ -558,3 +862,12 @@ def register(subparsers):
     run_parser.add_argument("--no-analysis", action="store_true", help="skip generator-based failure analysis in the Markdown summary")
     run_parser.add_argument("--dry-run", action="store_true", help="print the routing prompts without calling the agent")
     run_parser.set_defaults(func=run)
+
+    diagnose_parser = actions.add_parser("diagnose", help="analyze failed cases from a saved routing eval run")
+    diagnose_parser.add_argument("path", nargs="?", default=".", help="project folder (default: current folder)")
+    diagnose_parser.add_argument("--plan", default=PLAN_FILE, help=f"plan file, relative to the project folder (default: {PLAN_FILE})")
+    diagnose_parser.add_argument("--evals", default=EVAL_FILE, help=f"eval file, relative to the project folder (default: {EVAL_FILE})")
+    diagnose_parser.add_argument("--results", default=DEFAULT_RESULTS_FILE, help=f"results JSON path (default: {DEFAULT_RESULTS_FILE})")
+    diagnose_parser.add_argument("--summary", default=DEFAULT_SUMMARY_FILE, help=f"summary Markdown path (default: {DEFAULT_SUMMARY_FILE})")
+    diagnose_parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds allowed for analysis (default: %(default)s)")
+    diagnose_parser.set_defaults(func=diagnose)

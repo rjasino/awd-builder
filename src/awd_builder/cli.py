@@ -30,7 +30,7 @@ def main(argv=None):
     # Keep the original `evals <project>` runner invocation working after
     # introducing `evals init` and `evals run` subcommands.
     if argv and argv[0] == "evals" and (
-        len(argv) == 1 or argv[1] not in {"init", "run", "-h", "--help"}
+        len(argv) == 1 or argv[1] not in {"init", "run", "diagnose", "-h", "--help"}
     ):
         argv.insert(1, "run")
     args = build_parser().parse_args(argv)

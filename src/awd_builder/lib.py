@@ -203,7 +203,7 @@ def run_checked(args, cwd):
     return result
 
 
-def run_agent(tool_name, prompt, cwd, *, write, timeout, model=None):
+def run_agent(tool_name, prompt, cwd, *, write, timeout, model=None, agent="build"):
     """Send one non-interactive prompt to the chosen agentic CLI.
 
     write=True lets the agent edit files. write=False runs in read-only mode.
@@ -222,10 +222,10 @@ def run_agent(tool_name, prompt, cwd, *, write, timeout, model=None):
         prompt_file = Path(temp_dir) / "prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")
         args = [exe, "run"]
-        if tool_name == "opencode":
+        if tool_name == "opencode" and agent:
             # Ignore a project's workflow default agent (for example, game-producer)
             # for awd-builder automation; use OpenCode's standard build agent.
-            args += ["--agent", "build"]
+            args += ["--agent", agent]
         if write:
             args.append("--auto")
         args += [*model_args, "--file", str(prompt_file), "Follow the attached instructions."]

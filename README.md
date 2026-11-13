@@ -46,9 +46,9 @@ python scripts/install.py
 
    Edit `<project>/workflow-plan.yaml`. Set `generator` to `claude-code` or `opencode` (the CLI that authors canonical files), choose one or more output `harnesses`, and list the folders, agents, skills, and commands you want. Supported output harnesses are `opencode`, `claude-code`, `codex`, `github-copilot`, `pi`, and `cursor`. Existing plans using the old `tool` field remain valid and map that tool as both generator and single output harness.
 
-   Set `model` to the model name your generator accepts, for example `sonnet` for Claude Code or `opencode-go/claude-haiku-5-5` for OpenCode. It is used only for scaffolding and routing evals and is not copied into generated agents. To choose an agent's model, set `model` on that entry under `agents`. For an OpenCode target, use `provider/model` with an optional `#variant`. Leave the top-level model out to use the generator's default.
+   Set `model` to the model name your generator accepts, for example `sonnet` for Claude Code or `opencode-go/claude-haiku-5-5` for OpenCode. It is used for scaffolding, eval generation, and failure diagnosis; routing tests use the selected workflow harness's configured model. It is not copied into generated agents. To choose an agent's model, set `model` on that entry under `agents`. For an OpenCode target, use `provider/model` with an optional `#variant`. Leave the top-level model out to use the generator's default.
 
-   When OpenCode is the generator, `awd-builder` explicitly runs its built-in `build` agent so a project-specific `default_agent` does not take over scaffolding or eval tasks.
+   When OpenCode is the generator, `awd-builder` explicitly runs its built-in `build` agent for scaffolding, eval generation, and diagnosis. Routing tests instead run against the selected workflow harness and its configured agent.
 
 2. Preview, then scaffold:
 
@@ -84,7 +84,7 @@ python scripts/install.py
    awd-builder evals init
    ```
 
-   This uses the `eval-creator` skill to write `evals/routing.yaml` from the current canonical files in `.agents/`, so direct edits to agents, skills, or commands are reflected without updating the component list in `workflow-plan.yaml`. The plan still provides workflow metadata and generator settings. Use `--dry-run` to preview the prompt or `--force` to replace an existing eval file. Review and edit the generated cases as needed.
+   This uses the `eval-creator` skill in an isolated temporary workspace to write `evals/routing.yaml` from the current canonical files in `.agents/`, so direct edits to agents, skills, or commands are reflected without updating the component list in `workflow-plan.yaml`. Only canonical workflow context is copied; project harness configs and generated workflow agents are excluded. The validated file is copied back, and the temporary workspace is deleted. The plan still provides workflow metadata and generator settings. Use `--dry-run` to preview the prompt or `--force` to replace an existing eval file. Review and edit the generated cases as needed.
 
 4. Run the routing evals:
 
@@ -92,7 +92,7 @@ python scripts/install.py
    awd-builder evals run
    ```
 
-   Each run saves a JSON report to `evals/results.json` and a Markdown summary to `evals/results.md`. The JSON includes per-case expected and actual routes, pass status, and agent output. The summary shows whether all cases passed, details failed cases, and lists every case in a table. When failures occur, the configured generator also analyzes the saved results and adds likely causes and concrete recommendations to the summary. Both files are overwritten on each run. Use `--output <path>` or `--summary <path>` to choose project-relative output paths. Use `--no-analysis` to skip the generator-based failure analysis. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error. The previous `awd-builder evals <project>` form remains supported as an alias for `evals run <project>`.
+   Each run executes the cases against the selected workflow harness (defaults to the generator if it is a selected harness); use `--harness` to choose another supported runtime. For OpenCode, this uses the project's configured default agent, not `build`. It saves a JSON report to `evals/results.json` and a Markdown summary to `evals/results.md`. The JSON includes per-case expected and actual routes, pass status, agent output, and a snapshot of canonical component IDs, descriptions, paths, and hashes. The summary shows whether all cases passed, details failed cases, and lists every case in a table. On failures, the configured generator analyzes the saved results in an isolated temporary workspace; the workspace is removed afterward. Both reports are overwritten on each run. Use `--output <path>` or `--summary <path>` to choose project-relative output paths. Use `--no-analysis` to skip automatic diagnosis, or `awd-builder evals diagnose` to retry diagnosis later without rerunning cases. Diagnosis warns if canonical files changed since the run. `--dry-run` prints prompts without calling the agent or saving results; `--only <id>` runs one case. The exit code is 0 when every case passes, 1 when any fails, and 2 on a configuration or results-writing error. The previous `awd-builder evals <project>` form remains supported as an alias for `evals run <project>`.
 
 ## Application projects (Spec Kit)
 
@@ -123,6 +123,7 @@ For building an application rather than an agent workflow, `awd-builder app` set
 | `awd-builder scaffold run [p]`  | Generate canonical workflow files and sync the selected harnesses  |
 | `awd-builder evals init [p]`    | Generate routing eval cases in `evals/routing.yaml`                 |
 | `awd-builder evals run [p]`     | Run routing evals and save JSON and Markdown reports                |
+| `awd-builder evals diagnose [p]` | Reanalyze failed cases from a saved results JSON                     |
 | `awd-builder sync <p>`          | Sync canonical `.agents` components to selected harnesses           |
 | `awd-builder overrides --harness H --agent A` | Create a starter harness-specific agent override YAML |
 | `awd-builder app init [p]`      | Write an `app-workflow-plan.yaml` template into a project            |
@@ -131,6 +132,20 @@ For building an application rather than an agent workflow, `awd-builder app` set
 `[p]` is an optional project folder and defaults to the current folder. `sync` still requires its project folder.
 
 Run any command with `--help` for all options.
+
+### Passing arguments to workflow commands
+
+Put `$ARGUMENTS` in a canonical command's `instructions` to pass everything the user types after the command name into its prompt. For example:
+
+```yaml
+commands:
+  - name: review
+    description: Review files for bugs and missing tests.
+    instructions: |
+      Review $ARGUMENTS for bugs and missing tests.
+```
+
+Invoking `/review src/auth.ts` passes `src/auth.ts` in place of `$ARGUMENTS`. OpenCode commands also support positional placeholders such as `$1` and `$2` when you need individual arguments. Argument expansion is performed by the target harness, not by `awd-builder`; other harnesses and fallback formats may use different syntax or not support the same expansion. Review the generated command, especially when targeting a harness that uses a prompt or skill fallback.
 
 ## Output locations
 
@@ -143,7 +158,7 @@ Run any command with `--help` for all options.
 | Pi | `.agents/skills/awd-agent-*` fallback | `.agents/skills/` | `.pi/prompts/` |
 | Cursor | `.cursor/agents/` | `.cursor/skills/` (synced from `.agents/skills/`) | `.cursor/commands/` |
 
-All canonical agent and command sources live under `.agents/agents/` and `.agents/commands/`. The generator is currently Claude Code or OpenCode; the target harnesses are configured separately in the plan. Routing evals run through the configured generator. Private memory stays in `.awd-builder/memory/memories.json` and is ignored by git.
+All canonical agent and command sources live under `.agents/agents/` and `.agents/commands/`. The generator is currently Claude Code or OpenCode; target harnesses are configured separately in the plan. Eval generation and failure diagnosis use the generator, while routing tests run against the selected target harness. Private memory stays in `.awd-builder/memory/memories.json` and is ignored by git.
 
 The external `skill-creator` and `command-creator` skills are installed by `npx skills` for the selected generator. For Codex and Pi, agents or commands that do not have a native equivalent are exposed as best-effort skills or prompt templates; the sync command reports these fallbacks.
 
@@ -210,7 +225,7 @@ Source layout:
 | `src/awd_builder/evals.py`             | `evals` command                         |
 | `src/awd_builder/lib.py`               | Plan validation and agent CLI helpers   |
 | `src/awd_builder/templates/`           | Plan template                           |
-| `src/awd_builder/skills/eval-creator/` | Skill that writes the routing eval file |
+| `src/awd_builder/skills/eval-creator/` | Skill that drafts the routing eval file |
 | `src/awd_builder/skills/workflow-memory/` | Private memory instructions copied into scaffolded workflows |
 | `src/awd_builder/commands/`           | Built-in workflow commands copied into projects |
 | `docs/`                                | Notes and the original plan             |

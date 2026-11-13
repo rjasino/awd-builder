@@ -18,6 +18,7 @@ class CliDefaultTargetTests(unittest.TestCase):
             ["app", "run"],
             ["evals", "init"],
             ["evals", "run"],
+            ["evals", "diagnose"],
             ["overrides", "--harness", "opencode", "--agent", "planner"],
         )
         for command in commands:
@@ -31,6 +32,13 @@ class CliDefaultTargetTests(unittest.TestCase):
 
         self.assertEqual(captured[0].path, "my-project")
         self.assertTrue(captured[0].dry_run)
+
+    def test_evals_diagnose_is_not_rewritten_as_legacy_run(self):
+        captured = []
+        with patch("awd_builder.evals.diagnose", side_effect=lambda args: captured.append(args) or 0):
+            self.assertEqual(main(["evals", "diagnose", "my-project"]), 0)
+
+        self.assertEqual(captured[0].path, "my-project")
 
 
 if __name__ == "__main__":

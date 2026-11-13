@@ -13,11 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from awd_builder.evals import (  # noqa: E402
     DEFAULT_RESULTS_FILE,
     DEFAULT_SUMMARY_FILE,
+    diagnose,
     init,
     load_cases,
     load_canonical_components,
     run,
+    save_results,
 )
+from awd_builder.lib import load_plan  # noqa: E402
 
 
 class EvalResultTests(unittest.TestCase):
@@ -128,12 +131,85 @@ class EvalResultTests(unittest.TestCase):
             self.assertIn("| planning | PASS | agent/planner | agent/planner |", summary)
             self.assertIn("| unrelated | FAIL | none | skill/triage |", summary)
             routing_prompts = [call[0][1] for call in agent.call_args_list[:2]]
+            self.assertEqual(agent.call_args_list[0][1].get("agent"), None)
+            self.assertEqual(agent.call_args_list[1][1].get("agent"), None)
+            self.assertEqual(Path(agent.call_args_list[0][0][2]).resolve(), target.resolve())
             self.assertTrue(all("agent/planner: Current canonical planner description" in prompt for prompt in routing_prompts))
             self.assertTrue(all("skill/triage: Current canonical triage description" in prompt for prompt in routing_prompts))
             self.assertTrue(all("command/review: Review changes" in prompt for prompt in routing_prompts))
             self.assertTrue(all("Stale plan description" not in prompt for prompt in routing_prompts))
             analysis_prompt = agent.call_args_list[2][0][1]
             self.assertIn("Current canonical triage description", analysis_prompt)
+            self.assertNotEqual(Path(agent.call_args_list[2][0][2]), target)
+            self.assertEqual(payload["eval_harness"], "opencode")
+            self.assertEqual(payload["components"][0]["sha256"].__len__(), 64)
+
+    def test_diagnose_uses_isolated_workspace_and_warns_on_component_drift(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            self.make_project(target)
+            plan = load_plan(target / "workflow-plan.yaml")
+            inventory = load_canonical_components(target)
+            failed_result = {
+                "id": "planning",
+                "prompt": "Plan a feature",
+                "expected": "agent/planner",
+                "actual": "none",
+                "passed": False,
+                "returncode": 0,
+                "stdout": "ROUTE: none",
+                "stderr": "",
+            }
+            save_results(
+                target / DEFAULT_RESULTS_FILE,
+                plan,
+                "evals/routing.yaml",
+                [failed_result],
+                eval_harness="opencode",
+                eval_model=None,
+                inventory=inventory,
+                target=target,
+            )
+
+            canonical_agent = target / ".agents/agents/planner.md"
+            canonical_agent.write_text(
+                canonical_agent.read_text(encoding="utf-8").replace(
+                    "Current canonical planner description", "Updated planner description"
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                path=str(target),
+                plan="workflow-plan.yaml",
+                evals="evals/routing.yaml",
+                results=DEFAULT_RESULTS_FILE,
+                summary=DEFAULT_SUMMARY_FILE,
+                timeout=30,
+            )
+            analysis = "### `planning`\n- Likely cause: route ambiguity.\n- Recommendation: clarify description."
+            observed_workspace = {}
+
+            def analyze(_tool, _prompt, cwd, **_kwargs):
+                workspace = Path(cwd)
+                observed_workspace["root"] = workspace
+                observed_workspace["agent"] = (workspace / ".agents/agents/planner.md").is_file()
+                observed_workspace["results"] = (workspace / "evals/results.json").is_file()
+                observed_workspace["opencode"] = (workspace / ".opencode").exists()
+                return 0, analysis, ""
+
+            with patch("awd_builder.evals.run_agent", side_effect=analyze) as agent, \
+                    redirect_stdout(StringIO()):
+                result = diagnose(args)
+
+            self.assertEqual(result, 0)
+            self.assertEqual(agent.call_count, 1)
+            self.assertNotEqual(observed_workspace["root"].resolve(), target.resolve())
+            self.assertTrue(observed_workspace["agent"])
+            self.assertTrue(observed_workspace["results"])
+            self.assertFalse(observed_workspace["opencode"])
+            summary = (target / DEFAULT_SUMMARY_FILE).read_text(encoding="utf-8")
+            self.assertIn("Failure Analysis", summary)
+            self.assertIn("Canonical component files differ", summary)
 
     def test_expected_routes_are_validated_against_canonical_files(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -283,12 +359,16 @@ class EvalResultTests(unittest.TestCase):
             )
 
             def generate(_tool, _prompt, cwd, **_kwargs):
+                workspace = Path(cwd)
+                self.assertNotEqual(workspace.resolve(), target.resolve())
                 self.assertIn(".agents/agents", _prompt)
                 self.assertIn("canonical files", _prompt)
                 self.assertIn(".agents/skills", _prompt)
                 self.assertIn("skill/triage: Canonical triage", _prompt)
                 self.assertIn(".agents/skills/eval-creator/SKILL.md", _prompt)
-                evals_path = Path(cwd) / "evals/routing.yaml"
+                self.assertTrue((workspace / ".agents/agents/planner.md").is_file())
+                self.assertFalse((workspace / ".opencode").exists())
+                evals_path = workspace / "evals/routing.yaml"
                 evals_path.parent.mkdir(parents=True)
                 evals_path.write_text(
                     "cases:\n  - id: triage-direct-1\n    prompt: Triage this request\n    expected: skill/triage\n",
@@ -302,6 +382,7 @@ class EvalResultTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             run_agent.assert_called_once()
+            self.assertEqual(run_agent.call_args[1].get("agent"), "build")
             self.assertTrue((target / "evals/routing.yaml").is_file())
 
     def test_init_dry_run_does_not_call_agent_or_create_eval_file(self):
